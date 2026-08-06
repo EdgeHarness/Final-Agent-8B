@@ -1,5 +1,6 @@
 ---
 tags: [architecture, loop]
+cssclasses: [topic-core]
 ---
 
 # Agent Loop

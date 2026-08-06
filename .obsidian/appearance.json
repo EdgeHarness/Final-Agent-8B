@@ -3,5 +3,8 @@
   "theme": "system",
   "cssTheme": "",
   "showInlineTitle": true,
-  "showViewHeader": true
+  "showViewHeader": true,
+  "enabledCssSnippets": [
+    "vault-colors"
+  ]
 }

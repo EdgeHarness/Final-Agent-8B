@@ -1,5 +1,6 @@
 ---
 tags: [experiment, architecture]
+cssclasses: [topic-core]
 ---
 
 # Raw vs Harness

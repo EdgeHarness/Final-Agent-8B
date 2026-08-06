@@ -5,8 +5,21 @@
   "showAttachments": false,
   "hideUnresolved": false,
   "showOrphans": true,
-  "collapse-color-groups": true,
-  "colorGroups": [],
+  "collapse-color-groups": false,
+  "colorGroups": [
+    {
+      "query": "tag:#safety OR tag:#mcp",
+      "color": { "a": 1, "rgb": 1678960 }
+    },
+    {
+      "query": "tag:#backend OR tag:#hardware OR tag:#performance",
+      "color": { "a": 1, "rgb": 14244134 }
+    },
+    {
+      "query": "tag:#architecture OR tag:#loop OR tag:#tools OR tag:#state OR tag:#memory OR tag:#models OR tag:#tuning OR tag:#experiment OR tag:#reproducibility",
+      "color": { "a": 1, "rgb": 3770341 }
+    }
+  ],
   "collapse-display": true,
   "showArrow": false,
   "textFadeMultiplier": 0,
@@ -18,5 +31,5 @@
   "linkStrength": 1,
   "linkDistance": 250,
   "scale": 1.1463664563061104,
-  "close": false
+  "close": true
 }

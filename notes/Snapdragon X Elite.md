@@ -1,5 +1,6 @@
 ---
 tags: [hardware, performance]
+cssclasses: [topic-runtime]
 ---
 
 # Snapdragon X Elite

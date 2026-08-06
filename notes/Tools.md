@@ -1,5 +1,6 @@
 ---
 tags: [tools]
+cssclasses: [topic-core]
 ---
 
 # Tools

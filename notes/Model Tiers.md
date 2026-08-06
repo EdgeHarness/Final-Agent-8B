@@ -1,5 +1,6 @@
 ---
 tags: [architecture, models]
+cssclasses: [topic-core]
 ---
 
 # Model Tiers

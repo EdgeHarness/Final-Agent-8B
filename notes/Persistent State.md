@@ -1,5 +1,6 @@
 ---
 tags: [state, memory]
+cssclasses: [topic-core]
 ---
 
 # Persistent State

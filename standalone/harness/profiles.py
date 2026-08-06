@@ -123,7 +123,7 @@ PROFILES = {
                   "budget and output length.",
         plan=True, plan_max_steps=5, verify_rounds=2, loop_break=True,
         repeat_limit=3, think_streak_cap=2, num_predict=700, memory_k=3,
-        num_ctx=8192, max_calls=14),
+        num_ctx=8192, max_calls=20),
 
     # --- Qwen 2.5 14B -------------------------------------------------------
     "qwen2.5:14b": Profile(

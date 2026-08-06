@@ -1,5 +1,6 @@
 ---
 tags: [tools, safety, mcp]
+cssclasses: [topic-safety]
 ---
 
 # MCP Bridge

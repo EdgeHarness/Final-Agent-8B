@@ -47,6 +47,16 @@ Prerequisites: Ollama serving on `127.0.0.1:11434` with `llama3.1:8b` pulled,
 portable. Paths in the [[Real-Computer Mode|deny-list]] are Windows-shaped too,
 so on macOS that layer protects nothing — the root scope still holds.
 
+## The easy way: [[Agent Lab]]
+
+```bash
+./"Agent Lab.command"
+```
+
+Opens a local web console — pick the agent, pick an installed model, type a
+task, watch it run, and click the generated `.pptx` / `.xlsx` to view them in
+the browser. Nothing below is required for a demo.
+
 ## Without Ollama
 
 On the [[Snapdragon X Elite|Yoga]], `llama-server` replaces Ollama outright —

@@ -1,5 +1,6 @@
 ---
 tags: [tools, safety]
+cssclasses: [topic-safety]
 ---
 
 # Real-Computer Mode

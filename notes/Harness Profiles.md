@@ -1,5 +1,6 @@
 ---
 tags: [architecture, tuning]
+cssclasses: [topic-core]
 ---
 
 # Harness Profiles
