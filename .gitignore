@@ -1,0 +1,36 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# --- OS / editors ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# --- Claude Code: machine-local permissions, not shared ---
+.claude/settings.local.json
+
+# --- Obsidian: per-machine UI state, not vault content ---
+.obsidian/workspace.json
+notes/.obsidian/workspace.json
+
+# --- Agent run artifacts (state, not source) ---
+standalone/agents/*/workspace/
+standalone/agents/*/logs/
+runs/*
+!runs/.gitkeep
+*.log
+
+# --- Generated office files ---
+*.pptx
+*.xlsx
+*.docx
+*.ics
+
+# --- llama.cpp: the checkout build-xelite.ps1 clones (~25 GB) and its output ---
+standalone/llamacpp/llama.cpp/
+standalone/llamacpp/build-*/
+*.gguf

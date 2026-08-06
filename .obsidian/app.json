@@ -1,0 +1,16 @@
+{
+  "alwaysUpdateLinks": true,
+  "newLinkFormat": "shortest",
+  "useMarkdownLinks": false,
+  "attachmentFolderPath": "attachments",
+  "defaultViewMode": "preview",
+  "showLineNumber": true,
+  "readableLineLength": true,
+  "strictLineBreaks": false,
+  "userIgnoreFilters": [
+    ".claude/",
+    "logs/",
+    "workspace/",
+    "__pycache__/"
+  ]
+}
