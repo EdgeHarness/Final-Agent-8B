@@ -42,7 +42,7 @@ cfg["num_ctx"] = cfg.get("num_ctx") or profile.num_ctx
 |---|---|---|---|---|---|---|---|---|---|
 | `llama3.2:1b` | format-survival | ✗ | 0 | 2 | 1 | 350 | 2 | 8192 | 18 |
 | `llama3.2:3b` | guided-guarded | 3 | 1 | 2 | 2 | 500 | 3 | 8192 | 14 |
-| **`llama3.1:8b`** | **balanced** | **5** | **2** | **3** | **2** | **700** | **3** | **8192** | **14** |
+| **`llama3.1:8b`** | **balanced** | **5** | **2** | **3** | **2** | **700** | **3** | **8192** | **20** |
 | `qwen2.5:14b` | structured-reasoner | 6 | 2 | 3 | 3 | 900 | 4 | 12288 | 14 |
 | `qwen2.5:32b` | few-precise-steps | 6 | 1 | 3 | 3 | 1000 | 4 | 16384 | 12 |
 
@@ -56,6 +56,9 @@ The reasoning behind the shape of that table, from the module docstring:
   round tends to false-negative and send it back into a loop.
 - **8B** — solid instruction-following and JSON, so the full harness pays for
   itself: real planning, two verify rounds, standard budget.
+  *(Raised from 14 to **20** on 2026-08-06 — plan and verify are paid out of the
+  same counter, so the harness overhead was eating a 14-call budget on
+  three-part tasks. `DEFAULT` stays at 14, so the benchmark is unaffected.)*
 - **14B/32B** — strong at structured output and math, so richer outputs, longer
   plans, wider context. The 32B trades the second verify round and two budget
   slots for fewer, better steps: *when a call costs minutes, flailing is the
@@ -84,7 +87,8 @@ profile.max_calls`. Context: `config.num_ctx` > `profile.num_ctx`.
 > `bench/` runs with `DEFAULT` so the [[Raw vs Harness]] comparison stays
 > byte-identical to runs already on disk. `DEFAULT` is the plain `Profile()`:
 > plan on at 6 steps, 2 verify rounds, `repeat_limit` **1**, 700 tokens, 8192
-> context, 14 calls.
+> context, 14 calls — so `DEFAULT` and the 8B profile now differ on both
+> `repeat_limit` and `max_calls`.
 
 ## Related
 

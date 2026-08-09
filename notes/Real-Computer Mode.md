@@ -73,7 +73,7 @@ up [[Determinism|reproducibility]], deliberately.
 
 ## Budget
 
-The LLM call budget rises from 14 to **40** in root mode, overriding the
+The LLM call budget rises from 20 to **40** in root mode, overriding the
 [[Harness Profiles|profile]] for every model size. At 8B on CPU that is a long
 wall-clock commitment.
 

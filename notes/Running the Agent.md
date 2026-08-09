@@ -81,7 +81,7 @@ A healthy run prints, before any model call:
   harness profile: balanced — 5-step plan, 2 verify round(s), loop-break on, out<=700 tok, ctx 8192
     why: A strong general 8B with good instruction-following and JSON. ...
   model: llama3.1:8b
-  budget: 14 LLM calls
+  budget: 20 LLM calls
 ```
 
 Those numbers come from the `llama3.1:8b` entry in
