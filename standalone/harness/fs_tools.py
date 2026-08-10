@@ -290,6 +290,13 @@ WRITE_TOOLS = {"write_file", "append_file", "delete_path", "move_path", "run_com
 _KEEP_ALWAYS = {"think", "save_memory", "recall_memories", "done"}
 
 
+def injected():
+    """The file tools currently in the registry — which is flag-dependent, since
+    enable() leaves run_command out unless --shell was given. mcp_bridge needs
+    this to avoid dropping them when both real files and real accounts are on."""
+    return {name for name in _FS_TOOLS if name in TOOLS}
+
+
 def restrict_to_files():
     """Drop the simulated-office tools so a real-folder agent isn't distracted
     by a fake inbox/calendar (a known attractor for small models). Leaves the

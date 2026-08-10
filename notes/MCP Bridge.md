@@ -5,8 +5,9 @@ cssclasses: [topic-safety]
 
 # MCP Bridge
 
-[mcp_bridge.py](../standalone/harness/mcp_bridge.py), 373 lines — **not
-mentioned in the README**, and the largest undocumented piece of the codebase.
+[mcp_bridge.py](../standalone/harness/mcp_bridge.py), ~380 lines — the protocol
+layer. It was written before anything called it; [[Real Accounts]] is the
+configuration and the call sites that turned it on.
 
 > This is how the agent reaches real Gmail / Outlook (and anything else with an
 > MCP server) without the harness reimplementing Graph or the Gmail API.
@@ -54,5 +55,6 @@ completing the task** — otherwise a [[Agent Loop#Finish|verifier]] looking for
 
 ## Related
 
+- [[Real Accounts]] — the registry, the `--mcp` flag, and which servers to use
 - [[Real-Computer Mode]] — the same enable/confirm/WRITE_TOOLS shape
 - [[Tools]] · [[Architecture]]

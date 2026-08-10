@@ -20,6 +20,9 @@
   --think: #b57bff;
   --think-soft: rgba(181, 123, 255, .13);
   --radius: 12px;
+  --radius-lg: 16px;
+  --shadow: 0 1px 2px rgba(0,0,0,.28), 0 8px 24px rgba(0,0,0,.22);
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.22);
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
 }
@@ -30,6 +33,8 @@
     --line: #e2e5ec; --line-soft: #eceef3;
     --ink: #171a20; --ink-dim: #59606e; --ink-faint: #8b93a1;
     --accent-soft: rgba(91, 140, 255, .12);
+    --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.07);
+    --shadow-sm: 0 1px 2px rgba(16,24,40,.06);
   }
 }
 
@@ -55,14 +60,28 @@ button, input, textarea { font-family: inherit; color: inherit; }
 
 .topbar {
   display: flex; align-items: center; justify-content: space-between;
-  gap: 16px; padding: 10px 18px;
+  gap: 16px; padding: 13px 20px;
   background: var(--panel); border-bottom: 1px solid var(--line);
-  flex: 0 0 auto;
+  flex: 0 0 auto; box-shadow: var(--shadow-sm); z-index: 3;
 }
+/* Installed as an app there is no browser title bar, so the top strip becomes
+   the window's drag handle — otherwise the window can only be moved by its
+   1px edges, which feels broken. Interactive children opt back out. */
+.standalone .topbar { -webkit-app-region: drag; app-region: drag; padding-top: 15px; }
+.standalone .topbar button,
+.standalone .topbar select,
+.standalone .topbar input,
+.standalone .meter { -webkit-app-region: no-drag; app-region: no-drag; }
+
 .brand { display: flex; align-items: center; gap: 12px; }
-.brand .logo { color: var(--accent); font-size: 20px; }
-.brand h1 { font-size: 15px; letter-spacing: .2px; }
-.brand p { margin: 1px 0 0; font-size: 11px; color: var(--ink-faint); }
+.brand .logo {
+  color: var(--accent); font-size: 17px; line-height: 1;
+  display: grid; place-items: center; width: 32px; height: 32px;
+  border-radius: 9px; background: var(--accent-soft);
+  border: 1px solid rgba(91,140,255,.3);
+}
+.brand h1 { font-size: 16px; letter-spacing: -.01em; }
+.brand p { margin: 2px 0 0; font-size: 11px; color: var(--ink-faint); }
 
 .meters { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .meter {
@@ -89,16 +108,34 @@ button, input, textarea { font-family: inherit; color: inherit; }
 .layout {
   flex: 1 1 auto; min-height: 0;
   display: grid;
-  grid-template-columns: 264px minmax(0, 1fr) 350px;
+  grid-template-columns: 280px minmax(0, 1fr) 330px;
 }
 .rail, .folder { background: var(--panel); overflow-y: auto; min-height: 0; }
-.rail { border-right: 1px solid var(--line); padding: 16px 14px 28px; }
+.rail { border-right: 1px solid var(--line); padding: 0 0 28px; }
 .folder { border-left: 1px solid var(--line); display: flex; flex-direction: column; }
+
+/* Each sidebar block is one decision — model, connections, everything else —
+   separated so a demo audience can see there are exactly three. */
+.rail-section { padding: 16px 15px; border-bottom: 1px solid var(--line-soft); }
+.rail-section:last-child { border-bottom: none; }
 
 /* -------------------------------------------------------------- models --- */
 
-.rail-title { font-size: 11px; text-transform: uppercase; letter-spacing: .09em; color: var(--ink-faint); }
+.rail-title {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: .1em;
+  color: var(--ink-faint); margin-bottom: 11px;
+}
 .rail-hint { margin: 6px 0 14px; font-size: 11.5px; line-height: 1.5; color: var(--ink-faint); }
+
+/* Connection state: the one thing a viewer should be able to read across a room. */
+.pill-off, .pill-on {
+  text-transform: none; letter-spacing: 0; font-size: 10px; font-weight: 600;
+  padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line);
+  background: var(--panel-2); color: var(--ink-faint);
+}
+.pill-on { color: var(--good); border-color: rgba(62,207,142,.35); background: var(--good-soft); }
+.pill-on.live { color: var(--warn); border-color: rgba(240,180,41,.4); background: var(--warn-soft); }
 
 .agents { display: flex; flex-direction: column; gap: 8px; }
 .agent {
@@ -127,11 +164,11 @@ button, input, textarea { font-family: inherit; color: inherit; }
 
 /* ------------------------------------------------------------- options --- */
 
-.opts { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 12px; }
 .opts summary {
-  cursor: pointer; font-size: 11px; text-transform: uppercase;
-  letter-spacing: .09em; color: var(--ink-faint); list-style: none;
+  cursor: pointer; font-size: 10.5px; text-transform: uppercase;
+  letter-spacing: .1em; color: var(--ink-faint); list-style: none;
 }
+.opts summary:hover { color: var(--ink-dim); }
 .opts summary::-webkit-details-marker { display: none; }
 .opts summary::before { content: "▸ "; }
 .opts[open] summary::before { content: "▾ "; }
@@ -150,19 +187,63 @@ button, input, textarea { font-family: inherit; color: inherit; }
 .check { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--ink-dim); margin-top: 7px; }
 .check input { accent-color: var(--accent); }
 
+/* Real accounts: one row per MCP server, styled as selectable rows rather than
+   a checkbox list — this is a connection, not a preference. */
+.mcp-list { display: flex; flex-direction: column; gap: 4px; }
+.mcp-list .check {
+  align-items: center; margin: 0; padding: 7px 9px; gap: 8px;
+  border: 1px solid var(--line); border-radius: 9px; background: var(--panel-2);
+  cursor: pointer; transition: border-color .15s, background .15s;
+}
+.mcp-list .check:hover { border-color: var(--ink-faint); }
+.mcp-list .check:has(input:checked) {
+  border-color: var(--accent); background: var(--accent-soft); color: var(--ink);
+}
+.mcp-list em {
+  color: var(--ink-faint); font-style: normal; font-size: 10px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;
+}
+/* appearance:none — the native control paints its own text colour, which lands
+   near-black on this background and is unreadable. */
+.opt.inline select {
+  flex: 0 0 auto; width: 152px; font-size: 11px;
+  color: var(--ink); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 8px;
+  padding: 7px 24px 7px 9px; cursor: pointer;
+  appearance: none; -webkit-appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--ink-faint) 50%),
+                    linear-gradient(135deg, var(--ink-faint) 50%, transparent 50%);
+  background-position: calc(100% - 13px) 51%, calc(100% - 9px) 51%;
+  background-size: 4px 4px, 4px 4px;
+  background-repeat: no-repeat;
+}
+.opt.inline select:focus { outline: none; border-color: var(--accent); }
+.opt.inline select option { background: var(--panel); color: var(--ink); }
+.opt.inline.tight { margin-top: 10px; }
+
 /* -------------------------------------------------------------- stage --- */
 
 .stage { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 
+/* One card holding the prompt and its controls, so it reads as a single input
+   surface the way a chat composer does — not a textarea with buttons beside it. */
 .composer {
-  display: flex; gap: 10px; padding: 14px 18px 8px; align-items: flex-end;
+  margin: 18px 20px 0; padding: 12px 12px 10px;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow);
+  transition: border-color .15s, box-shadow .15s;
 }
+.composer:focus-within { border-color: var(--accent); }
 .composer textarea {
-  flex: 1; resize: none; background: var(--panel); border: 1px solid var(--line);
-  border-radius: var(--radius); padding: 11px 13px; font-size: 13.5px; line-height: 1.5;
+  width: 100%; display: block; resize: none; background: transparent;
+  border: 0; padding: 2px 4px 6px; font-size: 14.5px; line-height: 1.5;
 }
-.composer textarea:focus { outline: none; border-color: var(--accent); }
-.composer-actions { display: flex; gap: 8px; align-items: center; }
+.composer textarea:focus { outline: none; }
+.composer textarea::placeholder { color: var(--ink-faint); }
+.composer-actions {
+  display: flex; gap: 8px; align-items: center;
+  border-top: 1px solid var(--line-soft); padding-top: 10px;
+}
 
 /* which installed tag drives the run — amber when it is not the tag the
    agent's config.json asks for */
@@ -176,7 +257,7 @@ button, input, textarea { font-family: inherit; color: inherit; }
 .model-pick.substituted { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
 
 button.primary, button.ghost, a.ghost {
-  border-radius: 10px; padding: 11px 20px; font-size: 13px; font-weight: 600;
+  border-radius: 10px; padding: 9px 20px; font-size: 13px; font-weight: 600;
   cursor: pointer; border: 1px solid transparent; text-decoration: none;
 }
 button.primary { background: var(--accent); color: #fff; }
@@ -191,12 +272,32 @@ button.ghost:hover, a.ghost:hover { border-color: var(--ink-faint); color: var(-
 }
 .icon-btn:hover { color: var(--ink); border-color: var(--ink-faint); }
 
-.presets { display: flex; gap: 6px; flex-wrap: wrap; padding: 0 18px 12px; }
+/* A single scrolling row, not a wrapping block: it stays the same height whether
+   there are three suggestions or ten, and it survives past the first run. */
+.preset-strip {
+  display: flex; align-items: center; gap: 9px; padding: 12px 20px 10px;
+  min-width: 0;
+}
+.preset-label {
+  font-size: 10px; text-transform: uppercase; letter-spacing: .1em;
+  color: var(--ink-faint); flex: 0 0 auto;
+}
+.presets {
+  display: flex; gap: 7px; overflow-x: auto; scrollbar-width: none;
+  padding-bottom: 2px; min-width: 0;
+  /* fade the overflow instead of guillotining a chip at the edge */
+  mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent);
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent);
+}
+.presets::-webkit-scrollbar { display: none; }
 .preset {
+  flex: 0 0 auto; white-space: nowrap;
   background: var(--panel); border: 1px solid var(--line); color: var(--ink-dim);
-  border-radius: 999px; padding: 5px 11px; font-size: 11px; cursor: pointer;
+  border-radius: 999px; padding: 7px 13px; font-size: 11.5px; cursor: pointer;
+  transition: border-color .15s, color .15s, transform .1s;
 }
 .preset:hover { border-color: var(--accent); color: var(--ink); }
+.preset:active { transform: scale(.97); }
 
 /* ----------------------------------------------------------- timeline --- */
 
@@ -208,9 +309,24 @@ button.ghost:hover, a.ghost:hover { border-color: var(--ink-faint); color: var(-
   align-items: center; justify-content: center; text-align: center; padding: 30px;
   pointer-events: none;
 }
-.empty-art { font-size: 34px; color: var(--line); margin-bottom: 10px; }
-.empty h3 { font-size: 14px; color: var(--ink-dim); }
-.empty p { max-width: 400px; font-size: 12px; line-height: 1.65; color: var(--ink-faint); }
+.empty-art {
+  font-size: 22px; color: var(--accent); margin-bottom: 16px;
+  display: grid; place-items: center; width: 54px; height: 54px;
+  border-radius: 16px; background: var(--accent-soft);
+  border: 1px solid rgba(91,140,255,.28);
+}
+.empty h3 { font-size: 19px; color: var(--ink); letter-spacing: -.01em; }
+.empty p { max-width: 380px; font-size: 13px; line-height: 1.65; color: var(--ink-faint); margin: 8px 0 0; }
+
+/* What the audience is about to watch, said before it happens. */
+.empty-steps { display: flex; gap: 10px; margin-top: 26px; flex-wrap: wrap; justify-content: center; }
+.step {
+  display: flex; flex-direction: column; gap: 4px; text-align: left;
+  width: 160px; padding: 11px 13px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+}
+.step b { font-size: 11.5px; color: var(--ink-dim); font-weight: 650; }
+.step span { font-size: 11px; line-height: 1.45; color: var(--ink-faint); }
 
 .card {
   background: var(--panel); border: 1px solid var(--line);
@@ -235,6 +351,9 @@ button.ghost:hover, a.ghost:hover { border-color: var(--ink-faint); color: var(-
 .chip.role-driver { color: var(--accent); border-color: rgba(91,140,255,.35); background: var(--accent-soft); }
 .chip.role-router { color: var(--think); border-color: rgba(181,123,255,.35); background: var(--think-soft); }
 .chip.role-verifier { color: var(--good); border-color: rgba(62,207,142,.35); background: var(--good-soft); }
+/* a real account is in play for this run */
+.chip.real { color: var(--good); border-color: rgba(62,207,142,.35); background: var(--good-soft); }
+.chip.hot { color: var(--warn); border-color: rgba(240,180,41,.4); background: var(--warn-soft); }
 
 /* run banner */
 .card.banner { border-color: var(--accent); background: linear-gradient(180deg, var(--accent-soft), transparent); }

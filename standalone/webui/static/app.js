@@ -44,6 +44,59 @@ const S = {
   open: new Set(['files', 'inbox', 'calendar']),
 };
 
+/* ------------------------------------------------- real accounts (mcp) --- */
+
+/* The registry, rendered as checkboxes. Fetched once — servers.json is static
+   for the life of the process. Each server's setup steps ride along as the
+   title, so hovering says what it needs before it will work. */
+async function loadMcp() {
+  let servers;
+  try {
+    servers = await api('/api/mcp');
+  } catch (err) {
+    return;                       // no registry is not a reason to break the panel
+  }
+  const box = $('opt-mcp');
+  box.textContent = '';
+  for (const s of servers) {
+    // Built as nodes, not markup: the setup text goes into a title attribute and
+    // esc() only covers &<>, so a quote in servers.json would break out of it.
+    const label = el('label', 'check');
+    label.title = s.setup;
+    const cb = el('input');
+    cb.type = 'checkbox';
+    cb.className = 'mcp-server';
+    cb.value = s.name;
+    cb.onchange = refreshConnState;
+    label.append(cb, ` ${s.name} `, el('em', null, s.summary));
+    box.append(label);
+  }
+  $('opt-mcp-mode').onchange = refreshConnState;
+  refreshConnState();
+}
+
+function mcpSelected() {
+  return [...document.querySelectorAll('.mcp-server:checked')].map((el) => el.value);
+}
+
+/* The sidebar pill. It states whether real accounts are in play, because that is
+   the difference between a demo and the agent touching someone's actual mail.
+   Live mode is amber on purpose: it is the one setting that lets a local model
+   put a message in front of another human. */
+function refreshConnState() {
+  const on = mcpSelected();
+  const mode = $('opt-mcp-mode').value;
+  const pill = $('conn-state');
+  if (!on.length) {
+    pill.className = 'pill-off';
+    pill.textContent = 'none connected';
+    return;
+  }
+  const n = `${on.length} real account${on.length > 1 ? 's' : ''}`;
+  pill.className = 'pill-on' + (mode === 'live' ? ' live' : '');
+  pill.textContent = mode === 'live' ? `${n} · LIVE` : `${n} · ${mode.replace('_', ' ')}`;
+}
+
 /* ------------------------------------------------------------- models --- */
 
 async function loadAgents(keep) {
@@ -504,6 +557,15 @@ function onBanner(e) {
   grid.append(el('span', 'chip', `today: ${e.today}`),
               el('span', 'chip', e.endpoint));
   if (e.root) grid.append(el('span', 'chip', `real folder: ${e.root}`));
+  if (e.mcp) {
+    for (const s of e.mcp.servers) {
+      const c = el('span', 'chip real', `${s.id}: ${s.tools.length} tools`);
+      grid.append(c);
+    }
+    grid.append(el('span', 'chip real' + (e.mcp.mode === 'live' ? ' hot' : ''),
+                   e.mcp.mode === 'draft' ? 'draft — cannot send' : e.mcp.mode));
+    for (const w of e.mcp.warnings || []) grid.append(el('span', 'chip hot', w));
+  }
   if (e.yolo) grid.append(el('span', 'chip', 'confirmations off'));
   if (e.tiers) grid.append(el('span', 'chip', `tiers: ${Object.values(e.tiers.roles).join(', ')}`));
   card.append(grid);
@@ -730,6 +792,8 @@ async function startRun() {
     tiers: $('opt-tiers').checked,
     max_calls: parseInt($('opt-calls').value, 10) || null,
     model: $('model').value || null,
+    mcp: mcpSelected(),
+    mcp_mode: $('opt-mcp-mode').value,
   };
   clearStage();
   let res;
@@ -793,4 +857,20 @@ $('reset').onclick = async () => {
 };
 
 loadAgents();
+loadMcp();
 setInterval(() => { if (!S.run) loadAgents(true); }, 20000);
+
+/* Registering the worker is what makes the browser offer "Install app". It is
+   not required for anything the page does, so a failure is silent — an old
+   browser, or a pywebview window with no SW support, still works normally. */
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+}
+
+/* In a standalone window there is no browser chrome, so the drag region has to
+   come from the page or the title bar feels dead. */
+if (window.matchMedia('(display-mode: standalone)').matches) {
+  document.documentElement.classList.add('standalone');
+}

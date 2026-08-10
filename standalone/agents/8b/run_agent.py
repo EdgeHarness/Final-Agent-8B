@@ -17,11 +17,25 @@ optionally run shell commands - scoped to one folder:
 
 Without --root the agent only sees the simulated office world, as before.
 
+Real accounts (off by default) connect Gmail / Outlook / Teams through their
+MCP servers, so the agent works your actual mail and calendar instead of the
+simulated office. Reads are real; sends are not — see --mcp-live.
+
+    run.ps1 --mcp gmail,ms365 "Draft a reply to the budget thread"
+    run.ps1 --mcp-help                  <- what each server needs before it works
+
 Flags:
     --root PATH     working root; every path the agent touches must be inside it
     --shell         also allow run_command (PowerShell), still confirmed
     --yolo          skip confirmation prompts for overwrite/delete/move/shell
-    --max-calls N   LLM call budget (default 14 simulated, 40 with --root)
+    --max-calls N   LLM call budget (default 20 simulated, 40 with --root/--mcp)
+    --mcp LIST      comma-separated MCP servers from mcp/servers.json
+                    (gmail, gcal, ms365, teams, ms365-work)
+    --mcp-live      allow send/reply tools. Default is draft: the model composes,
+                    a human sends. Every write is still confirmed.
+    --mcp-read-only drop every world-changing MCP tool
+    --mcp-list      start the named servers, print the tools they expose, exit
+    --mcp-help      print setup steps for every known server, exit
 
 State persists between runs:
     workspace/state.json   inbox, calendar, sent mail, messages, reminders
@@ -39,6 +53,8 @@ sys.path.insert(0, PROJECT)
 
 from harness import agent as agent_mod  # noqa: E402
 from harness import fs_tools  # noqa: E402
+from harness import mcp_bridge  # noqa: E402
+from harness import mcp_config  # noqa: E402
 from harness import profiles  # noqa: E402
 from harness.agent import run_harness  # noqa: E402
 from harness.llm import LLM, OLLAMA_URL  # noqa: E402
@@ -59,12 +75,28 @@ You also have tools that act on the REAL computer, inside the working root
 
 def parse_flags(argv):
     opts = {"root": None, "shell": False, "yolo": False, "max_calls": None,
-            "tiers": False, "small": None, "deep": None, "office": False}
+            "tiers": False, "small": None, "deep": None, "office": False,
+            "mcp": [], "mcp_mode": None, "mcp_list": False, "mcp_help": False}
     rest = []
     i = 0
     while i < len(argv):
         a = argv[i]
-        if a == "--root" and i + 1 < len(argv):
+        if a == "--mcp" and i + 1 < len(argv):
+            opts["mcp"] = [s.strip() for s in argv[i + 1].split(",") if s.strip()]
+            i += 2
+        elif a == "--mcp-live":
+            opts["mcp_mode"] = "live"
+            i += 1
+        elif a == "--mcp-read-only":
+            opts["mcp_mode"] = "read_only"
+            i += 1
+        elif a == "--mcp-list":
+            opts["mcp_list"] = True
+            i += 1
+        elif a == "--mcp-help":
+            opts["mcp_help"] = True
+            i += 1
+        elif a == "--root" and i + 1 < len(argv):
             opts["root"] = argv[i + 1]
             i += 2
         elif a == "--shell":
@@ -123,6 +155,40 @@ def confirm(action, detail):
         return False
 
 
+def mcp_names(opts, cfg):
+    """Servers to start: --mcp wins, otherwise a config.json "mcp".enable list."""
+    return opts["mcp"] or (cfg.get("mcp") or {}).get("enable") or []
+
+
+def mcp_mode(opts, cfg):
+    return opts["mcp_mode"] or (cfg.get("mcp") or {}).get("mode") or "draft"
+
+
+def start_mcp(names, mode, cfg, confirm_cb, root=None):
+    """Launch the named servers and fold their tools into the harness registry.
+
+    Returns the enable() summary. The simulated office tools are dropped: an
+    agent holding both list_emails (fake inbox) and gmail_search_emails (real
+    account) picks the wrong one, and the fake one always answers faster."""
+    servers = mcp_config.names_to_servers(names, cfg.get("mcp"), mode=mode)
+    summary = mcp_bridge.enable(servers, confirm=confirm_cb, mode=mode)
+    mcp_bridge.restrict_to_mcp(keep_office_docs=not root,
+                               keep_extra=fs_tools.injected() if root else ())
+    return summary
+
+
+def print_mcp_banner(summary, mode):
+    label = {"draft": "DRAFT — reads real, composes drafts, cannot send",
+             "live": "LIVE — send/reply exposed, every write confirmed",
+             "read_only": "READ-ONLY — no world-changing tools"}[mode]
+    print(f"  real accounts: {label}")
+    for s in summary:
+        writes = f", {len(s['writes'])} write" if s["writes"] else ", read-only"
+        print(f"    {s['id']}: {len(s['tools'])} tools{writes}")
+    for w in mcp_config.count_warnings(summary):
+        print(f"    warning: {w}")
+
+
 def main():
     with open(os.path.join(HERE, "config.json"), encoding="utf-8-sig") as f:
         cfg = json.load(f)
@@ -136,6 +202,25 @@ def main():
 
     opts, task = parse_flags(sys.argv[1:])
     root = opts["root"] or cfg.get("root")
+
+    if opts["mcp_help"]:
+        for name, _ in mcp_config.available():
+            print(mcp_config.setup_notes(name) + "\n")
+        return
+    if opts["mcp_list"]:
+        # Ground truth for the allow lists in mcp/servers.json: what the server
+        # ACTUALLY calls its tools, rather than what the registry guessed.
+        names = mcp_names(opts, cfg)
+        if not names:
+            print("--mcp-list needs --mcp NAME. Known: "
+                  + ", ".join(n for n, _ in mcp_config.available()))
+            return
+        for s in start_mcp(names, mcp_mode(opts, cfg), cfg, confirm):
+            print(f"\n{s['id']}  ({s['mode']})")
+            for t in s["tools"]:
+                print(f"    {'write' if t in s['writes'] else ' read'}  {t}")
+        return
+
     if not task:
         task = input("Task for the agent: ").strip()
     if not task:
@@ -155,8 +240,24 @@ def main():
         today = datetime.date.today()
         agent_mod.SIM_TODAY = today
         agent_mod.SIM_TODAY_HUMAN = today.strftime("%A, %B %d, %Y")
+
+    names, mcp_summary = mcp_names(opts, cfg), None
+    mcp_run_mode = mcp_mode(opts, cfg)   # not `mode`: the banner below reuses that
+    if names:
+        mcp_summary = start_mcp(names, mcp_run_mode, cfg,
+                                None if opts["yolo"] else confirm, root=root)
+        # Append, don't assign: --root may already have installed REAL_RULES, and
+        # union the write sets for the same reason.
+        agent_mod.EXTRA_RULES += mcp_bridge.mail_rules(mcp_run_mode)
+        agent_mod.EXTRA_WRITE_TOOLS = (set(agent_mod.EXTRA_WRITE_TOOLS)
+                                       | mcp_bridge.WRITE_TOOLS)
+        # Real mail has real dates; the fixed benchmark clock would make the
+        # model search the wrong week.
+        today = datetime.date.today()
+        agent_mod.SIM_TODAY = today
+        agent_mod.SIM_TODAY_HUMAN = today.strftime("%A, %B %d, %Y")
     agent_mod.MAX_CALLS = (opts["max_calls"] or cfg.get("max_calls")
-                           or (40 if root else profile.max_calls))
+                           or (40 if (root or names) else profile.max_calls))
 
     world = World(os.path.join(HERE, "workspace"), persistent=True)
     mem = MemoryStore(os.path.join(HERE, "memory", "memory.jsonl"))
@@ -181,6 +282,8 @@ def main():
         print(f"  real files: {mode} inside {root}"
               + ("   [--yolo: confirmations off]" if opts["yolo"] else ""))
         print(f"  toolset: {toolset}")
+    if mcp_summary:
+        print_mcp_banner(mcp_summary, mcp_run_mode)
     print(f"  budget: {agent_mod.MAX_CALLS} LLM calls")
     ep = run_harness(llm, world, mem, task)
 
@@ -206,7 +309,9 @@ def main():
     log_path = os.path.join(log_dir, f"run_{n:03d}.json")
     with open(log_path, "w", encoding="utf-8") as f:
         json.dump({"task": task, "root": root, "transcript": ep.transcript,
-                   "finished": ep.finished, "summary": ep.done_summary}, f,
+                   "finished": ep.finished, "summary": ep.done_summary,
+                   "mcp": ({"servers": names, "mode": mcp_run_mode}
+                           if names else None)}, f,
                   indent=1, ensure_ascii=False)
     print(f"transcript: {log_path}")
 

@@ -5,53 +5,85 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Agent Lab</title>
 <link rel="stylesheet" href="/static/style.css">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧪</text></svg>">
+<link rel="icon" href="/static/icons/icon-192.png">
+
+<!-- installable as a desktop app: own window, dock/taskbar icon, no URL bar -->
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#0c0e13">
+<meta name="color-scheme" content="dark light">
+<link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Agent Lab">
 </head>
 <body>
 
 <header class="topbar">
   <div class="brand">
     <span class="logo">◆</span>
-    <div>
+    <div class="brand-text">
       <h1>Agent Lab</h1>
-      <p>on-device agents · one model at a time · nothing leaves this machine</p>
+      <p>on-device agents · nothing leaves this machine</p>
     </div>
   </div>
+
   <div class="meters" id="meters">
     <div class="meter" id="meter-ollama"><span class="dot"></span><span class="label">checking ollama…</span></div>
     <div class="meter hidden" id="meter-calls"><span class="label">calls</span><b id="calls-val">0/14</b>
       <div class="bar"><i id="calls-bar"></i></div></div>
     <div class="meter hidden" id="meter-time"><span class="label">elapsed</span><b id="time-val">0s</b></div>
-    <div class="meter hidden" id="meter-tok"><span class="label">tokens out</span><b id="tok-val">0</b></div>
+    <div class="meter hidden" id="meter-tok"><span class="label">tokens</span><b id="tok-val">0</b></div>
   </div>
 </header>
 
 <div class="layout">
 
-  <!-- ------------------------------------------------------------ models -->
+  <!-- ----------------------------------------------------------- sidebar -->
   <aside class="rail">
-    <h2 class="rail-title">Models</h2>
-    <p class="rail-hint">Pick one. Each folder is its own agent with its own
-      workspace, memory and history.</p>
-    <div id="agents" class="agents"></div>
+    <section class="rail-section">
+      <h2 class="rail-title">Model</h2>
+      <div id="agents" class="agents"></div>
+    </section>
 
-    <details class="opts" id="opts">
-      <summary>Options</summary>
-      <label class="opt">
-        <span>Real folder <em>optional</em></span>
-        <input type="text" id="opt-root" placeholder="leave empty for the simulated office">
+    <!-- Surfaced, not buried in Options: connecting a real mailbox is the most
+         consequential switch on this page, so it reads as its own decision. -->
+    <section class="rail-section">
+      <h2 class="rail-title">Connections
+        <span class="pill-off" id="conn-state">simulated</span>
+      </h2>
+      <div id="opt-mcp" class="mcp-list"></div>
+      <label class="opt inline tight">
+        <span>Mode</span>
+        <select id="opt-mcp-mode">
+          <option value="draft">draft · never sends</option>
+          <option value="live">live · can send</option>
+          <option value="read_only">read only</option>
+        </select>
       </label>
-      <p class="opt-note">With a folder set, the agent gets real read/write file
-        tools scoped to it — and asks you before anything destructive.</p>
-      <label class="check"><input type="checkbox" id="opt-shell"> allow shell commands</label>
-      <label class="check"><input type="checkbox" id="opt-yolo"> skip confirmations</label>
-      <label class="check"><input type="checkbox" id="opt-office"> keep office tools too</label>
-      <label class="check"><input type="checkbox" id="opt-tiers"> tiered model router</label>
-      <label class="opt inline">
-        <span>Call budget</span>
-        <input type="number" id="opt-calls" min="2" max="80" placeholder="auto">
-      </label>
-    </details>
+      <p class="opt-note">Inference stays local either way. These tools reach
+        Google and Microsoft. Draft mode hides every tool that could transmit
+        to a person.</p>
+    </section>
+
+    <section class="rail-section">
+      <details class="opts" id="opts">
+        <summary>Advanced</summary>
+        <label class="opt">
+          <span>Real folder <em>optional</em></span>
+          <input type="text" id="opt-root" placeholder="simulated office if empty">
+        </label>
+        <p class="opt-note">With a folder set, the agent gets real read/write
+          file tools scoped to it — and asks before anything destructive.</p>
+        <label class="check"><input type="checkbox" id="opt-shell"> allow shell commands</label>
+        <label class="check"><input type="checkbox" id="opt-yolo"> skip confirmations</label>
+        <label class="check"><input type="checkbox" id="opt-office"> keep office tools too</label>
+        <label class="check"><input type="checkbox" id="opt-tiers"> tiered model router</label>
+        <label class="opt inline">
+          <span>Call budget</span>
+          <input type="number" id="opt-calls" min="2" max="80" placeholder="auto">
+        </label>
+      </details>
+    </section>
   </aside>
 
   <!-- ------------------------------------------------------------- stage -->
@@ -65,16 +97,24 @@
         <button id="stop" class="ghost hidden">Stop</button>
       </div>
     </section>
-    <div id="presets" class="presets"></div>
+
+    <div class="preset-strip">
+      <span class="preset-label">Try</span>
+      <div id="presets" class="presets"></div>
+    </div>
 
     <section class="timeline-wrap">
       <div id="timeline" class="timeline"></div>
       <div id="empty" class="empty">
         <div class="empty-art">◆</div>
-        <h3>Nothing running</h3>
-        <p>Choose a model on the left, pick or type a task, and press Run.
-           Every step — the plan, each token the model writes, every tool call
-           and its result — shows up here as it happens.</p>
+        <h3>Ready when you are</h3>
+        <p>Pick a task above and press Run. Everything the agent does shows up
+          here as it happens.</p>
+        <div class="empty-steps">
+          <div class="step"><b>1 · Plan</b><span>The model writes its steps before acting</span></div>
+          <div class="step"><b>2 · Act</b><span>Each tool call and its result, live</span></div>
+          <div class="step"><b>3 · Verify</b><span>It checks its own work before finishing</span></div>
+        </div>
       </div>
     </section>
   </main>
@@ -82,7 +122,7 @@
   <!-- ------------------------------------------------------------ folder -->
   <aside class="folder">
     <div class="folder-head">
-      <div>
+      <div class="folder-id">
         <h2>Workspace</h2>
         <p id="folder-path" class="folder-path">—</p>
       </div>
