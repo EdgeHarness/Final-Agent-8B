@@ -59,6 +59,29 @@ TOOLS = {
         "run": lambda w, m, a: w.add_event(a["title"], a["date"], a["start_time"], a["end_time"],
                                            a.get("attendees"), a.get("location")),
     },
+    "update_event": {
+        "desc": "Change an existing calendar event: move it, rename it, or change who is "
+                "coming. Give only the fields you are changing. Use this to move or "
+                "reschedule a meeting - adding a new event leaves the old one in place.",
+        "params": {"id": ("string, an event id like 'c2' from list_events", True),
+                   "title": ("string, optional", False),
+                   "date": ("string YYYY-MM-DD, optional", False),
+                   "start_time": ("string 24h HH:MM, optional", False),
+                   "end_time": ("string 24h HH:MM, optional", False),
+                   "attendees": ("list of email strings, optional", False),
+                   "location": ("string, optional", False)},
+        "example": {"tool": "update_event", "args": {"id": "c2", "date": "2026-07-23",
+                                                     "start_time": "09:00", "end_time": "10:00"}},
+        "run": lambda w, m, a: w.update_event(a["id"], a.get("title"), a.get("date"),
+                                              a.get("start_time"), a.get("end_time"),
+                                              a.get("location"), a.get("attendees")),
+    },
+    "cancel_event": {
+        "desc": "Remove an event from the calendar.",
+        "params": {"id": ("string, an event id like 'c2' from list_events", True)},
+        "example": {"tool": "cancel_event", "args": {"id": "c4"}},
+        "run": lambda w, m, a: w.cancel_event(a["id"]),
+    },
     "send_message": {
         "desc": "Send a chat/instant message to a person.",
         "params": {"to": ("string, contact name", True),

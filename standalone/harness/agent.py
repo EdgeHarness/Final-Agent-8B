@@ -408,7 +408,8 @@ def run_harness(llm, world, mem, task_text):
     world_version = 0    # bumped on successful writes; a call's repeat budget is
                          # only spent while the world is unchanged, and resets
                          # the moment anything writes
-    write_tools = {"send_email", "add_event", "send_message", "set_reminder",
+    write_tools = {"send_email", "add_event", "update_event", "cancel_event",
+                   "send_message", "set_reminder",
                    "create_presentation", "create_spreadsheet", "save_memory"}
     write_tools |= EXTRA_WRITE_TOOLS  # empty for the benchmark; fs_tools adds its own
 

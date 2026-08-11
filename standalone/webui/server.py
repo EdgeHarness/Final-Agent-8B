@@ -215,7 +215,12 @@ def workspace(agent):
                              "mtime": os.path.getmtime(os.path.join(logs_dir, name))})
 
     return {
-        "emails": state.get("emails", []),
+        # Newest first, the way every mail client and the agent's own
+        # list_emails tool order them. This panel rendered them in insertion
+        # order, so a newly arrived email appeared at the BOTTOM of the inbox,
+        # under nine older ones.
+        "emails": sorted(state.get("emails", []), key=lambda e: e.get("date", ""),
+                         reverse=True),
         "sent": state.get("sent_emails", []),
         "events": sorted(state.get("events", []), key=lambda e: (e["date"], e["start"])),
         "messages": state.get("messages", []),
@@ -238,6 +243,25 @@ def workspace_file(agent, name):
 EMU_PER_PT = 12700
 MAX_SHEET_ROWS = 300
 MAX_SHEET_COLS = 40
+
+
+def _cell_text(val, numeric, cell):
+    """What the cell says, honouring its number format.
+
+    The preview printed str(value), so a figure written with a #,##0 format sat
+    in the browser as 1240000 while Excel showed 1,240,000 for the same file.
+    On a deck built from an email that quoted "$1,240,000" it read as though the
+    agent had mangled the number. Only the grouped formats this app writes are
+    handled; anything else is left alone rather than guessed at.
+    """
+    if val is None:
+        return ""
+    if not numeric:
+        return str(val)
+    fmt = (cell.number_format or "") if cell is not None else ""
+    if "#,##0" in fmt:
+        return f"{val:,.2f}" if ".00" in fmt else f"{val:,.0f}"
+    return str(val)
 
 
 def _solid_fill(shape):
@@ -381,7 +405,7 @@ def _xlsx_preview(path):
                 numeric = isinstance(val, (int, float)) and not isinstance(val, bool)
                 align = (cf.alignment.horizontal if cf.alignment else None) or \
                         ("right" if numeric else None)
-                cells.append({"v": "" if val is None else str(val), "f": formula,
+                cells.append({"v": _cell_text(val, numeric, cf), "f": formula,
                               "b": bool(cf.font and cf.font.bold), "a": align})
             rows.append(cells)
         sheets.append({"sheet": ws.title, "rows": rows, "widths": widths,

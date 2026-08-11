@@ -164,6 +164,60 @@ class TestWorld(unittest.TestCase):
         self.assertEqual(self.w.actions[-1]["ok"], False)
 
 
+class TestCalendarEditing(unittest.TestCase):
+    """The calendar was write-only: add an event, never move or cancel one.
+    Asked to "move my Design review to Thursday", the agent added a SECOND
+    event and reported the meeting moved. The original was still there."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.w = World(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_moving_an_event_changes_it_rather_than_adding_one(self):
+        before = len(self.w.events)
+        ev = self.w.update_event("c2", date="2026-07-23", start_time="09:00",
+                                 end_time="10:00")
+        self.assertEqual(len(self.w.events), before)
+        self.assertEqual((ev["date"], ev["start"], ev["end"]),
+                         ("2026-07-23", "09:00", "10:00"))
+        self.assertEqual(ev["title"], "Design review")  # untouched fields survive
+
+    def test_an_update_is_validated_like_a_new_event(self):
+        with self.assertRaises(ToolError):
+            self.w.update_event("c2", start_time="15:00", end_time="14:00")
+        with self.assertRaises(ToolError):
+            self.w.update_event("c2", date="next thursday")
+
+    def test_updating_an_event_that_is_not_there_says_how_to_find_one(self):
+        with self.assertRaises(ToolError) as cm:
+            self.w.update_event("c999", title="x")
+        self.assertIn("list_events", str(cm.exception))
+
+    def test_cancelling_removes_it_and_reports_what_went(self):
+        out = self.w.cancel_event("c2")
+        self.assertEqual(out["cancelled"]["title"], "Design review")
+        self.assertNotIn("c2", [e["id"] for e in self.w.events])
+
+    def test_an_id_is_never_handed_out_twice(self):
+        """Ids were len(events)+1. Cancelling an event from the middle of the
+        list then adding one handed out an id that was still in use: seven
+        events, cancel c2, len+1 is 7, and c7 already exists."""
+        self.w.cancel_event("c2")
+        new = self.w.add_event("Deep work", "2026-07-23", "14:00", "15:00")
+        ids = [e["id"] for e in self.w.events]
+        self.assertEqual(len(ids), len(set(ids)), ids)
+        self.assertEqual(new["id"], "c8")
+
+    def test_both_editors_count_as_writes_for_the_loop(self):
+        from harness import agent as a
+        src = open(a.__file__).read()
+        self.assertIn('"update_event"', src)
+        self.assertIn('"cancel_event"', src)
+
+
 # ------------------------------------------------------------------- memory ---
 
 class TestMemory(unittest.TestCase):
@@ -540,6 +594,58 @@ class TestLoop(unittest.TestCase):
         self.assertEqual(llm.calls, agent.MAX_CALLS)
         self.assertFalse(ep.finished)
         self.assertEqual(ep.parse_failures, agent.MAX_CALLS)
+
+
+# ------------------------------------------------------------------- server ---
+
+class TestWorkspacePanel(unittest.TestCase):
+    def test_the_inbox_panel_shows_the_newest_email_first(self):
+        """It rendered state.json's insertion order, so a mail that had just
+        arrived appeared at the bottom of the inbox under nine older ones."""
+        from webui import server
+        with tempfile.TemporaryDirectory() as d:
+            folder = os.path.join(d, "agents", "demo")
+            os.makedirs(os.path.join(folder, "workspace"))
+            with open(os.path.join(folder, "config.json"), "w") as f:
+                json.dump({"name": "demo", "model": "llama3.1:8b"}, f)
+            with open(os.path.join(folder, "workspace", "state.json"), "w") as f:
+                json.dump({"emails": [
+                    {"id": "a", "date": "2026-07-13 08:00", "subject": "old"},
+                    {"id": "b", "date": "2026-07-20 08:40", "subject": "newest"},
+                    {"id": "c", "date": "2026-07-15 09:10", "subject": "middle"}]}, f)
+            saved = server.AGENTS_DIR
+            server.AGENTS_DIR = os.path.join(d, "agents")
+            try:
+                got = [e["subject"] for e in server.workspace("demo")["emails"]]
+            finally:
+                server.AGENTS_DIR = saved
+        self.assertEqual(got, ["newest", "middle", "old"])
+
+
+class TestSpreadsheetPreview(unittest.TestCase):
+    def test_a_grouped_number_previews_the_way_excel_shows_it(self):
+        """office.py writes a #,##0 format, so Excel shows 1,240,000. The
+        preview printed str(value) and showed 1240000, which on a demo built
+        from an email quoting "$1,240,000" reads as a mangled number."""
+        from webui.server import _cell_text
+
+        class Cell:
+            number_format = "#,##0"
+
+        class Money:
+            number_format = '#,##0.00'
+
+        self.assertEqual(_cell_text(1240000, True, Cell()), "1,240,000")
+        self.assertEqual(_cell_text(1240000.5, True, Money()), "1,240,000.50")
+        self.assertEqual(_cell_text("West", False, Cell()), "West")
+        self.assertEqual(_cell_text(None, False, Cell()), "")
+
+    def test_a_number_with_no_format_is_left_alone(self):
+        class Plain:
+            number_format = "General"
+
+        from webui.server import _cell_text
+        self.assertEqual(_cell_text(2026, True, Plain()), "2026")
 
 
 # ------------------------------------------------------------------- runner ---

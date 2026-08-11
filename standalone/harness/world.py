@@ -141,6 +141,52 @@ class World:
             events = [e for e in events if e["date"] == date]
         return sorted(events, key=lambda e: (e["date"], e["start"]))
 
+    def _next_event_id(self):
+        """One past the highest c<N> in use. This was len(events)+1, which is the
+        same id twice as soon as anything can be removed from the list."""
+        used = [int(e["id"][1:]) for e in self.events
+                if isinstance(e.get("id"), str) and e["id"][1:].isdigit()]
+        return f"c{max(used, default=0) + 1}"
+
+    def _find_event(self, event_id):
+        if not isinstance(event_id, str):
+            raise ToolError(f"id must be a string like 'c2', got {event_id!r}")
+        for e in self.events:
+            if e["id"] == event_id.strip():
+                return e
+        raise ToolError(f"no event with id {event_id!r}; use list_events to see valid ids")
+
+    def update_event(self, event_id, title=None, date=None, start_time=None,
+                     end_time=None, location=None, attendees=None):
+        """Change an existing event in place. Only the fields given are touched."""
+        ev = self._find_event(event_id)
+        if title is not None:
+            if not str(title).strip():
+                raise ToolError("'title' must be a non-empty string")
+            ev["title"] = str(title).strip()
+        if date is not None:
+            ev["date"] = _check_date(date)
+        if start_time is not None:
+            ev["start"] = _check_time(start_time, "start_time")
+        if end_time is not None:
+            ev["end"] = _check_time(end_time, "end_time")
+        if ev["end"] <= ev["start"]:
+            raise ToolError(f"end_time ({ev['end']}) must be after start_time ({ev['start']})")
+        if location is not None:
+            ev["location"] = str(location)
+        if attendees is not None:
+            if isinstance(attendees, str):
+                attendees = [a.strip() for a in attendees.split(",") if a.strip()]
+            if not isinstance(attendees, list):
+                raise ToolError("'attendees' must be a list of email addresses")
+            ev["attendees"] = [str(a) for a in attendees]
+        return ev
+
+    def cancel_event(self, event_id):
+        ev = self._find_event(event_id)
+        self.events.remove(ev)
+        return {"cancelled": ev}
+
     def add_event(self, title, date, start_time, end_time, attendees=None, location=None):
         if not title or not isinstance(title, str):
             raise ToolError("'title' must be a non-empty string")
@@ -155,7 +201,7 @@ class World:
             attendees = [a.strip() for a in attendees.split(",") if a.strip()]
         if not isinstance(attendees, list):
             raise ToolError("'attendees' must be a list of email addresses")
-        ev = {"id": f"c{len(self.events) + 1}", "title": title.strip(), "date": date,
+        ev = {"id": self._next_event_id(), "title": title.strip(), "date": date,
               "start": start, "end": end, "location": str(location or ""),
               "attendees": [str(a) for a in attendees]}
         self.events.append(ev)
