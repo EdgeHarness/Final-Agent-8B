@@ -291,6 +291,7 @@ class Episode:
         self.tool_errors = 0
         self.done_summary = None
         self.finished = False
+        self.unrequested = ""   # the verifier's report of side effects the task never asked for
 
     def note(self, kind, content):
         self.transcript.append({"kind": kind, "content": content})
@@ -541,6 +542,13 @@ def run_harness(llm, world, mem, task_text):
                     verify_rounds += 1
                     verdict = _verify(llm, world, task_text)
                     ep.note("verify", json.dumps(verdict, ensure_ascii=False))
+                    # Carried on the episode, not acted on: the writes already
+                    # happened, and auto-undoing them would be a bigger side
+                    # effect than the one being reported. The runner surfaces it
+                    # so the person who asked can judge.
+                    extra = str(verdict.get("unrequested") or "").strip()
+                    if extra and extra.lower() not in ("none", "n/a", "nothing"):
+                        ep.unrequested = extra
                     if not verdict.get("complete", True):
                         give_feedback("VERIFIER: the task is NOT finished yet. Missing: "
                                       f"{verdict.get('missing', 'unknown')}. Continue with the next tool call.",
@@ -676,7 +684,11 @@ VERIFY_SYSTEM = ("You are a task-completion verifier. Today is {today}.\n"
                  "reviewing how the tools were called, how they could have been "
                  "called better, or what would be nice to add: if every "
                  "requirement the task states has a matching successful action, "
-                 "the task is complete. When in doubt, answer complete: true.")
+                 "the task is complete. When in doubt, answer complete: true.\n"
+                 "Separately, report any action that CHANGED something (sent, "
+                 "created, updated, cancelled) that the task never asked for. "
+                 "Reading and thinking are never unrequested. This report does "
+                 "not make the task incomplete.")
 
 
 def _verify(llm, world, task_text):
@@ -697,7 +709,9 @@ def _verify(llm, world, task_text):
               + "\n\nTake each requirement the task states, in turn, and find the action "
                 "that satisfies it. Report as missing only a requirement with no such action. "
                 'Respond with one JSON object: {"complete": true or false, "missing": "<the '
-                'task requirements with no matching action, or an empty string>"}')
+                'task requirements with no matching action, or an empty string>", '
+                '"unrequested": "<world-changing actions the task never asked for, or an '
+                'empty string>"}')
     msgs = [{"role": "system", "content": VERIFY_SYSTEM.format(today=SIM_TODAY_HUMAN)},
             {"role": "user", "content": prompt}]
     # Failing open is the right call: a broken verifier must not trap the agent

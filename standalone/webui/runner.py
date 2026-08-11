@@ -350,6 +350,7 @@ def main():
 
     emit("world", **world_snapshot(world, mem, root))
     emit("end", finished=ep.finished, summary=ep.done_summary,
+         unrequested=ep.unrequested or None,
          calls=llm.calls, budget=agent_mod.MAX_CALLS,
          output_tokens=llm.output_tokens, prompt_tokens=llm.prompt_tokens,
          wall=round(llm.wall, 1), parse_failures=ep.parse_failures,

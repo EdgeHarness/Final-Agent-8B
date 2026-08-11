@@ -1094,6 +1094,16 @@ function onEnd(e) {
   const say = doneSummary || e.summary;
   if (say) card.append(el('div', 'endsay', say));
 
+  /* The verifier's report of side effects the task never asked for. Nothing is
+     auto-undone - undoing a send is impossible and undoing an edit is a bigger
+     side effect than the one being reported - so the honest move is to say it
+     plainly to the person who can judge. */
+  if (e.unrequested) {
+    const w = el('div', 'endwarn');
+    w.append(el('b', null, 'Not asked for: '), document.createTextNode(e.unrequested));
+    card.append(w);
+  }
+
   /* What it made. The timeline says a file was written and then scrolls away;
      this is the only place the outputs are listed together, and each one is
      the same click as its tab. */

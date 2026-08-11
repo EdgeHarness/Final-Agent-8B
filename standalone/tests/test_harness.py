@@ -522,6 +522,25 @@ class TestVerifier(unittest.TestCase):
         self.assertTrue(verdict["complete"])
         self.assertIn("unverified", verdict)
 
+    def test_unrequested_side_effects_are_reported_not_undone(self):
+        """The verifier now flags world-changing actions the task never asked
+        for. The run still completes - the writes already happened, and undoing
+        them would be a bigger side effect than the one reported - but the
+        episode carries the report for the runner and the UI to surface."""
+        verdict = ('{"complete": true, "missing": "",'
+                   ' "unrequested": "cancelled the Design review"}')
+        llm = _StubLLM(verdict)
+        out = agent._verify(llm, self.world, "remember my preference")
+        self.assertEqual(out["unrequested"], "cancelled the Design review")
+
+    def test_a_none_ish_unrequested_report_is_treated_as_empty(self):
+        """Small models answer "None" instead of an empty string."""
+        for noise in ("None", "none", "N/A", ""):
+            verdict = {"complete": True, "missing": "", "unrequested": noise}
+            extra = str(verdict.get("unrequested") or "").strip()
+            flagged = bool(extra) and extra.lower() not in ("none", "n/a", "nothing")
+            self.assertFalse(flagged, noise)
+
     def test_a_verifier_that_raises_does_not_kill_the_run(self):
         class Boom:
             calls = 0
@@ -782,6 +801,23 @@ class TestLoop(unittest.TestCase):
             agent.run_raw(llm, self.world, self.mem, "message sam")
         state = json.load(open(os.path.join(self.tmp.name, "state.json")))
         self.assertEqual(len(state["messages"]), 1)
+
+    def test_the_unrequested_report_reaches_the_episode(self):
+        agent.set_profile(profiles.replace(profiles.DEFAULT, plan=False, verify_rounds=1))
+
+        class VerifierAware(_ScriptedLLM):
+            def chat(self, messages, role=None, **kw):
+                if role == "verifier":
+                    self.calls += 1
+                    return ('{"complete": true, "missing": "",'
+                            ' "unrequested": "messaged Sam"}')
+                return super().chat(messages, **kw)
+
+        llm = VerifierAware([self.call("send_message", to="sam", text="hi"),
+                             self.call("done", summary="did it")])
+        ep = agent.run_harness(llm, self.world, self.mem, "message sam")
+        self.assertTrue(ep.finished)
+        self.assertEqual(ep.unrequested, "messaged Sam")
 
     def test_the_budget_is_a_hard_stop(self):
         agent.set_profile(profiles.replace(profiles.DEFAULT, plan=False, verify_rounds=0))
