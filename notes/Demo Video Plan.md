@@ -24,21 +24,27 @@ So the narration says **"an email lands in the inbox"** and never "your Gmail",
 "connected to Outlook", or "syncs with your mail". The demo is honest as a
 capability demo. It becomes a lie the moment it claims a live account.
 
-### 1.2 The model must actually be local on the day
+### 1.2 The shim is fine for takes. It matters only for a published claim.
 
-Right now port 11434 is an OpenRouter shim pretending to be ollama. The UI says
-"Ollama running" and the banner says `llama3.1:8b`, but the tokens are coming
-from OpenRouter over the network. **The line "nothing leaves this machine" is
-false while that shim is up.**
+Port 11434 is an OpenRouter shim standing in for ollama, deliberately: it is a
+local testing convenience and it is not pushed. `openrouter_shim.py` is
+git-excluded and the key lives in the environment, never in a tracked file.
 
-Before recording:
+So every take in `demo/` is a valid rehearsal, and the pacing, the beats and the
+artifacts are all real. The one thing the shim changes is **whether beat 1 can
+be said out loud**. "Everything here runs on this laptop" is a claim about where
+the tokens come from, and while the shim is up they come from OpenRouter.
 
-    pkill -f openrouter_shim.py
-    ollama pull llama3.1:8b
-    ollama serve
+Two honest ways to ship:
 
-Then confirm the banner still says `llama3.1:8b` and the run completes. Expect
-it to be slower than the shim; see 1.3.
+- **Record the final take against real ollama.** `pkill -f openrouter_shim.py`,
+  `ollama pull llama3.1:8b`, `ollama serve`. Slower per call, which helps the
+  pacing. Then beat 1 is true as written.
+- **Or keep the shim and drop the locality claim** from beat 1, making it a
+  capability demo: "one email in, a spreadsheet and a deck out." The footage
+  needs no change either way, only the narration.
+
+Decide before the voiceover is recorded, not after.
 
 ### 1.3 The run is faster than the narration
 
