@@ -557,7 +557,14 @@ def run_harness(llm, world, mem, task_text):
             args = normalize_args(name, args)
 
             problems = validate_call(name, args)
-            wrong_day = task_date_mismatch(task_text, args) if not problems else None
+            # Writes only. The guard exists to stop a write landing on the wrong
+            # day; a READ with a mismatched date is the model looking around,
+            # and the result comes back as evidence either way. Checked on
+            # every call, it hounded a run whose task merely said "never on
+            # Fridays": four corrections for four innocent list_events probes,
+            # 14 calls for a task that needs four.
+            wrong_day = (task_date_mismatch(task_text, args)
+                         if not problems and name in write_tools else None)
             if wrong_day:
                 ep.invalid_calls += 1
                 give_feedback("WRONG DATE: " + wrong_day + " Reply with one corrected JSON object.",

@@ -737,6 +737,22 @@ class TestLoop(unittest.TestCase):
         self.assertEqual(len(self.world.messages), 1)
         self.assertFalse([f for f in llm.seen_feedback if "never included" in f])
 
+    def test_the_date_guard_checks_writes_and_lets_reads_roam(self):
+        """"Remember ... never on Fridays" made the guard hound four innocent
+        list_events probes - a preference, not a date instruction, and reads
+        are how a model looks around. Writes are still checked."""
+        agent.set_profile(profiles.replace(profiles.DEFAULT, plan=False, verify_rounds=0))
+        llm = _ScriptedLLM([self.call("list_events", date="2026-07-21"),   # "wrong" day: fine
+                            self.call("set_reminder", text="x",
+                                      date="2026-07-21", time="09:00"),   # write: questioned
+                            self.call("done", summary="d")])
+        agent.run_harness(llm, self.world, self.mem,
+                          "Set a reminder for my Wednesday meetings")
+        wrongs = [f for f in llm.seen_feedback if "WRONG DATE" in f]
+        self.assertEqual(len(wrongs), 1)
+        listed = self.executed("list_events")
+        self.assertEqual(len(listed), 1, "the read must have run unquestioned")
+
     def test_done_ends_the_run_and_keeps_the_summary(self):
         agent.set_profile(profiles.replace(profiles.DEFAULT, plan=False, verify_rounds=0))
         ep = agent.run_harness(_ScriptedLLM([self.call("done", summary="all finished")]),
