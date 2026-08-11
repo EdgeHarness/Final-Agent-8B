@@ -5,12 +5,28 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Agent Lab</title>
 <link rel="stylesheet" href="/static/style.css">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧪</text></svg>">
+<!-- The same circled A as the header mark. Drawn rather than an emoji, so the
+     tab matches the product instead of borrowing a test tube from the OS. -->
+<link rel="icon" href="/static/mark.svg" type="image/svg+xml">
 </head>
 <body>
 
 <header class="topbar">
-  <div class="mark">Agent Lab<span>on-device · nothing leaves this machine</span></div>
+  <!-- The mark sits left of the wordmark and is the same shape as the favicon,
+       so the tab and the header read as one thing. Swap the <svg> for the real
+       logo when it lands; the slot and its sizing do not change. -->
+  <div class="mark">
+    <span class="mark-icon" aria-hidden="true">
+      <svg viewBox="0 0 32 32" width="26" height="26">
+        <circle cx="16" cy="16" r="15" fill="none" stroke="currentColor" stroke-width="2"/>
+        <path d="M10.4 22 16 9.6 21.6 22M12.6 18.2h6.8"
+              fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </span>
+    <span class="mark-word">Agent Lab</span>
+    <span class="mark-sub">your private assistant</span>
+  </div>
   <!-- Meters read value-first. "calls 4/20" makes the eye parse a label before
        it reaches the number it came for; the figure leads and the label sits
        under it. Tabular figures so the row does not twitch as digits change. -->

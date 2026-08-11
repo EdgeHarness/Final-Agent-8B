@@ -168,10 +168,13 @@ button, input, textarea, select { font-family: inherit; color: inherit; }
 }
 /* The wordmark used to inherit the 16px body default, an unplanned fifth size
    outside the scale. Pinned to --t-base and carried by weight instead. */
-.mark { font-weight: 600; letter-spacing: -.01em; font-size: var(--t-base); }
-.mark span {
-  color: var(--ink-faint); font-weight: 400; margin-left: 8px; font-size: var(--t-sm);
-}
+.mark { display: flex; align-items: center; gap: 9px; font-size: var(--t-base); }
+.mark-icon { display: flex; color: var(--ink); flex: 0 0 auto; }
+.mark-word { font-weight: 600; letter-spacing: -.01em; }
+.mark-sub { color: var(--ink-faint); font-weight: 400; font-size: var(--t-sm); }
+/* The strapline is the first thing to go when the bar gets tight: the mark and
+   the name identify the product, the description only elaborates. */
+@media (max-width: 860px) { .mark-sub { display: none; } }
 
 /* Value-first: "calls 4/20" makes the eye parse a label before it reaches the
    number it came for. The figure leads, the label sits under it at metadata
