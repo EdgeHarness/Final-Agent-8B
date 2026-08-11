@@ -37,6 +37,33 @@ sys.path.insert(0, PROJECT)
 from harness import profiles  # noqa: E402
 
 # Rough per-size guidance for the picker; the machine, not the harness, decides.
+# Model facts from openrouter.ai, generated into model_catalog.json rather than
+# fetched. The product's whole claim is that nothing leaves the machine, so the
+# UI must not reach the network to describe a model. Regenerate with
+# tools/refresh_catalog.py when the shipped model list changes.
+def _load_catalog():
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model_catalog.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f).get("models", {})
+    except (OSError, ValueError):
+        return {}
+
+
+CATALOG = _load_catalog()
+
+
+def catalog_for(tag):
+    """Exact tag first, then the bare family, so llama3.1 matches llama3.1:8b."""
+    if tag in CATALOG:
+        return CATALOG[tag]
+    base = tag.split(":")[0]
+    for key, val in CATALOG.items():
+        if key.split(":")[0] == base:
+            return val
+    return {}
+
+
 SPEED_HINT = {
     "1b": ("instant", "Fast enough to feel live. Makes the most mistakes — the best "
                       "place to watch the harness repair a call."),
@@ -119,6 +146,7 @@ def agent_list():
             "note": cfg.get("note", ""),
             "speed": speed,
             "blurb": blurb,
+            "catalog": catalog_for(cfg["model"]),
             "profile": profile.to_dict(),
             "installed": tag_installed(cfg["model"], tags),
             "files": len(os.listdir(files_dir)) if os.path.isdir(files_dir) else 0,

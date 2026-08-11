@@ -1,0 +1,59 @@
+{
+ "_note": "Generated from openrouter.ai/api/v1/models. Shipped so the UI never has to reach the network at runtime.",
+ "models": {
+  "llama3.1:8b": {
+   "title": "Llama 3.1 8B Instruct",
+   "vendor": "Meta",
+   "description": "Meta's latest class of model (Llama 3.1) launched with a variety of sizes & flavors. This 8B instruct-tuned version is fast and efficient.",
+   "context": 131072,
+   "pull": "ollama pull llama3.1:8b",
+   "url": "https://ollama.com/library/llama3.1",
+   "source": "meta-llama/llama-3.1-8b-instruct"
+  },
+  "llama3.2:3b": {
+   "title": "Llama 3.2 3B Instruct",
+   "vendor": "Meta",
+   "description": "Llama 3.2 3B is a 3-billion-parameter multilingual large language model, optimized for advanced natural language processing tasks like dialogue generation, reasoning, and…",
+   "context": 131072,
+   "pull": "ollama pull llama3.2:3b",
+   "url": "https://ollama.com/library/llama3.2",
+   "source": "meta-llama/llama-3.2-3b-instruct"
+  },
+  "llama3.2:1b": {
+   "title": "Llama 3.2 1B Instruct",
+   "vendor": "Meta",
+   "description": "Llama 3.2 1B is a 1-billion-parameter language model focused on efficiently performing natural language tasks, such as summarization, dialogue, and multilingual text analysis.",
+   "context": 60000,
+   "pull": "ollama pull llama3.2:1b",
+   "url": "https://ollama.com/library/llama3.2",
+   "source": "meta-llama/llama-3.2-1b-instruct"
+  },
+  "qwen3:8b": {
+   "title": "Qwen3 8B",
+   "vendor": "Qwen",
+   "description": "Qwen3-8B is a dense 8.2B parameter causal language model from the Qwen3 series, designed for both reasoning-heavy tasks and efficient dialogue.",
+   "context": 131072,
+   "pull": "ollama pull qwen3:8b",
+   "url": "https://ollama.com/library/qwen3",
+   "source": "qwen/qwen3-8b"
+  },
+  "gemma3:4b": {
+   "title": "Gemma 3 4B",
+   "vendor": "Google",
+   "description": "Gemma 3 introduces multimodality, supporting vision-language input and text outputs.",
+   "context": 131072,
+   "pull": "ollama pull gemma3:4b",
+   "url": "https://ollama.com/library/gemma3",
+   "source": "google/gemma-3-4b-it"
+  },
+  "phi4-mini:3.8b": {
+   "title": "Phi 4",
+   "vendor": "Microsoft",
+   "description": "Microsoft Research Phi-4 is designed to perform well in complex reasoning tasks and can operate efficiently in situations with limited memory or where quick responses are needed.",
+   "context": 16384,
+   "pull": "ollama pull phi4-mini:3.8b",
+   "url": "https://ollama.com/library/phi4-mini",
+   "source": "microsoft/phi-4"
+  }
+ }
+}

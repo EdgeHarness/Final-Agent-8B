@@ -40,27 +40,21 @@
 
   <!-- ------------------------------------------------------------ models -->
   <aside class="rail">
-    <h2 class="rail-title">Models</h2>
+    <div class="rail-head">
+      <h2 class="rail-title">Models</h2>
+      <span class="rail-count" id="agent-count"></span>
+    </div>
     <p class="rail-hint">Each folder is its own agent, with its own workspace and memory.</p>
+    <!-- Ordered by use, so the one you reach for is the one at the top. The
+         filter only earns its place once there are enough agents to hunt
+         through, so app.js hides it below that. -->
+    <div class="rail-search hidden" id="rail-search">
+      <input type="search" id="agent-filter" placeholder="Search models"
+             autocomplete="off" aria-label="Filter models">
+    </div>
     <div id="agents" class="agents" role="radiogroup" aria-label="Models"></div>
+    <p class="rail-none hidden" id="agents-none">No model matches that.</p>
 
-    <details class="opts" id="opts">
-      <summary>Options</summary>
-      <label class="opt">
-        <span>Real folder <em>optional</em></span>
-        <input type="text" id="opt-root" placeholder="leave empty for the simulated office">
-      </label>
-      <p class="opt-note">With a folder set, the agent gets real read/write file
-        tools scoped to it — and asks you before anything destructive.</p>
-      <label class="check"><input type="checkbox" id="opt-shell"> allow shell commands</label>
-      <label class="check"><input type="checkbox" id="opt-yolo"> skip confirmations</label>
-      <label class="check"><input type="checkbox" id="opt-office"> keep office tools too</label>
-      <label class="check"><input type="checkbox" id="opt-tiers"> tiered model router</label>
-      <label class="opt inline">
-        <span>Call budget</span>
-        <input type="number" id="opt-calls" min="2" max="80" placeholder="auto">
-      </label>
-    </details>
   </aside>
 
   <!-- The run on the left, what it produced on the right, permanently. The
@@ -111,13 +105,42 @@
              control; the border moves to it, so the row reads as a single
              place to act instead of three unrelated widgets. -->
         <div class="composer">
-          <textarea id="task" rows="2" placeholder="Tell the agent what to do…"></textarea>
+          <textarea id="task" rows="1" placeholder="Tell the agent what to do…"></textarea>
           <div class="composer-actions">
+            <!-- The run options live here rather than in a rail drawer. They
+                 are settings on the task you are about to send, so they belong
+                 on the thing you send it with. -->
+            <button class="plus" id="opts-btn" type="button" aria-haspopup="dialog"
+                    aria-expanded="false" aria-controls="opts" title="Run options">
+              <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
+                <path d="M10 4.5v11M4.5 10h11" fill="none" stroke="currentColor"
+                      stroke-width="1.6" stroke-linecap="round"/>
+              </svg>
+              <span class="sr">Run options</span>
+            </button>
+            <span class="opt-dots" id="opt-dots" aria-live="polite"></span>
+            <span class="composer-spacer"></span>
             <select id="model" class="model-pick"
                     title="Which installed model actually drives this agent"></select>
-            <span class="composer-spacer"></span>
             <button id="stop" class="ghost hidden">Stop</button>
             <button id="run" class="primary" disabled>Run</button>
+          </div>
+
+          <div class="opts" id="opts" role="dialog" aria-label="Run options" hidden>
+            <label class="opt">
+              <span>Real folder <em>optional</em></span>
+              <input type="text" id="opt-root" placeholder="leave empty for the simulated office">
+            </label>
+            <p class="opt-note">With a folder set, the agent gets real read and write
+              file tools scoped to it, and asks you before anything destructive.</p>
+            <label class="check"><input type="checkbox" id="opt-shell"> allow shell commands</label>
+            <label class="check"><input type="checkbox" id="opt-yolo"> skip confirmations</label>
+            <label class="check"><input type="checkbox" id="opt-office"> keep office tools too</label>
+            <label class="check"><input type="checkbox" id="opt-tiers"> tiered model router</label>
+            <label class="opt inline">
+              <span>Call budget</span>
+              <input type="number" id="opt-calls" min="2" max="80" placeholder="auto">
+            </label>
           </div>
         </div>
       </div>

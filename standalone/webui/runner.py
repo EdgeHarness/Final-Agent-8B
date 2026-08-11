@@ -23,6 +23,7 @@ import argparse
 import datetime
 import json
 import os
+import re
 import sys
 import time
 import traceback
@@ -103,6 +104,21 @@ def list_tree(root):
         if len(out) >= MAX_TREE_ENTRIES:
             return out[:MAX_TREE_ENTRIES]
     return out
+
+
+
+def next_run_index(log_dir):
+    """One past the highest run_NNN already there.
+
+    This counted files, not runs. Two things broke it. With --tiers,
+    model_calls.jsonl takes a slot and the numbering jumps; and deleting any
+    transcript frees an index the next run then silently writes over, so a run
+    could destroy an earlier one with no error. Max-of-existing never reuses a
+    number, whatever else is in the folder.
+    """
+    used = [int(m.group(1)) for m in
+            (re.match(r"run_(\d+)\.json$", f) for f in os.listdir(log_dir)) if m]
+    return max(used, default=0) + 1
 
 
 def world_snapshot(world, mem, root=None):
@@ -263,7 +279,7 @@ def main():
         llm_mod.STREAM_HOOK = agent_mod.EVENT_HOOK = tools_mod.TOOL_HOOK = None
 
     os.makedirs(log_dir, exist_ok=True)
-    log_path = os.path.join(log_dir, f"run_{len(os.listdir(log_dir)) + 1:03d}.json")
+    log_path = os.path.join(log_dir, f"run_{next_run_index(log_dir):03d}.json")
     with open(log_path, "w", encoding="utf-8") as f:
         json.dump({"task": args.task, "root": root, "agent": args.agent,
                    "model": cfg["model"], "via": "webui",

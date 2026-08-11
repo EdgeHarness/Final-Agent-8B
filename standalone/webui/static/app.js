@@ -65,6 +65,8 @@ const S = {
 async function loadAgents(keep) {
   const data = await api('/api/agents');
   S.agents = data.agents;
+  // whether a model can be pulled in place, or only by a command you run
+  S.ollama = !!data.ollama;
   $('meter-ollama').className = 'meter dotmeter ' + (data.ollama ? 'up' : 'down');
   $('meter-ollama').querySelector('.label').textContent =
     data.ollama ? 'ollama running' : 'ollama not running';
@@ -77,51 +79,104 @@ async function loadAgents(keep) {
   }
 }
 
-/* One skeleton per row, filled from M3's list slots: a content slot carrying
-   label + supporting text, and a trailing slot. Every agent renders the same
-   four lines in the same places whether or not it has a profile, a blurb or a
-   download prompt, so the column scans as a list rather than as a stack of
-   cards each arranged to suit its own contents. */
+/* The model tag is what a person picks by, so it leads. The folder label ("8B")
+   was the headline and the tag was supporting text under it, which had the
+   naming backwards: every folder is named after its model, so the folder label
+   only repeats the tag in a vaguer form.
+   Below it, the model's own description, generated from openrouter into
+   model_catalog.json and shipped, so describing a model needs no network. */
+function agentRow(a) {
+  const on = a.id === S.agent;
+  const cat = a.catalog || {};
+  const card = el('button', 'agent' + (on ? ' on' : ''));
+  card.type = 'button';
+  card.setAttribute('role', 'radio');
+  card.setAttribute('aria-checked', on ? 'true' : 'false');
+  card.onclick = () => selectAgent(a.id);
+
+  const head = el('div', 'agent-head');
+  head.append(el('span', 'agent-name', a.model));
+  if (!a.installed) head.append(el('span', 'agent-flag', 'not installed'));
+  else if (a.runs) head.append(el('span', 'agent-trail', `${a.runs} run${a.runs === 1 ? '' : 's'}`));
+  card.append(head);
+
+  if (cat.title) {
+    card.append(el('div', 'agent-support',
+      [cat.vendor, cat.title].filter(Boolean).join(' ')));
+  }
+  card.append(el('div', 'agent-desc', cat.description || a.blurb || ''));
+
+  const meta = [
+    cat.context ? `${Math.round(cat.context / 1024)}k context` : null,
+    a.speed,
+    a.profile ? a.profile.label : null,
+    `${a.files} file${a.files === 1 ? '' : 's'}`,
+    `${a.memories} learned`,
+  ].filter(Boolean).join('  ·  ');
+  card.append(el('div', 'agent-meta', meta));
+
+  if (!a.installed) card.append(downloadRow(a, cat));
+  return card;
+}
+
+/* Three ways a model can arrive, and the row offers whichever is possible.
+   Ollama reachable: pull it in place, which the server already streams.
+   Ollama not reachable: the command to run, one click to copy, because the
+   button cannot do it for you and telling you to "install ollama" without the
+   command is a dead end. Either way, a link to the model's page. */
+function downloadRow(a, cat) {
+  const row = el('div', 'agent-get');
+  const cmd = cat.pull || `ollama pull ${a.model}`;
+
+  if (S.ollama) {
+    const btn = el('button', 'ghost small', 'Download');
+    btn.type = 'button';
+    btn.onclick = (e) => { e.stopPropagation(); pullModel(a, row); };
+    row.append(btn);
+  } else {
+    const copy = el('button', 'cmd', '');
+    copy.type = 'button';
+    copy.title = 'Copy this command';
+    copy.append(el('code', null, cmd), el('span', 'cmd-hint', 'copy'));
+    copy.onclick = (e) => {
+      e.stopPropagation();
+      navigator.clipboard.writeText(cmd).then(
+        () => { copy.querySelector('.cmd-hint').textContent = 'copied'; },
+        () => { copy.querySelector('.cmd-hint').textContent = 'select it'; });
+      setTimeout(() => { copy.querySelector('.cmd-hint').textContent = 'copy'; }, 1600);
+    };
+    row.append(copy);
+  }
+
+  if (cat.url) {
+    const link = el('a', 'agent-link', 'Model page');
+    link.href = cat.url;
+    link.target = '_blank';
+    link.rel = 'noreferrer noopener';
+    link.onclick = (e) => e.stopPropagation();
+    row.append(link);
+  }
+  return row;
+}
+
 function renderAgents() {
   const box = $('agents');
   box.textContent = '';
-  for (const a of S.agents) {
-    const on = a.id === S.agent;
-    const card = el('button', 'agent' + (on ? ' on' : ''));
-    card.type = 'button';
-    card.setAttribute('role', 'radio');
-    card.setAttribute('aria-checked', on ? 'true' : 'false');
-    card.onclick = () => selectAgent(a.id);
+  const q = ($('agent-filter').value || '').trim().toLowerCase();
+  /* Most used first, so the model you reach for is the one at the top. Ties
+     break on the tag rather than on folder order, which is arbitrary. */
+  const ranked = [...S.agents].sort((x, y) =>
+    y.runs - x.runs || x.model.localeCompare(y.model));
+  const shown = ranked.filter((a) => !q ||
+    [a.model, a.name, a.speed, (a.catalog || {}).title, (a.catalog || {}).vendor]
+      .some((f) => String(f || '').toLowerCase().includes(q)));
 
-    const head = el('div', 'agent-head');
-    head.append(el('span', 'agent-name', a.name.replace(/^Agent\s*/, '')),
-                el('span', 'agent-trail', a.speed));
-    card.append(head, el('div', 'agent-support', a.model));
-
-    /* One metadata line, dot-separated. The harness profile used to be a
-       coloured chip of its own, which meant a four-line card carried three
-       unrelated text treatments. It is the same kind of fact as the counts,
-       so it reads in the same voice as them. */
-    const meta = [
-      a.profile ? a.profile.label : null,
-      `${a.runs} run${a.runs === 1 ? '' : 's'}`,
-      `${a.files} file${a.files === 1 ? '' : 's'}`,
-      `${a.memories} learned`,
-    ].filter(Boolean).join(' · ');
-    card.append(el('div', 'agent-meta', meta));
-    card.append(el('div', 'agent-blurb', a.blurb));
-
-    if (!a.installed) {
-      const row = el('div', 'agent-missing');
-      row.append(el('span', null, 'not downloaded'));
-      const btn = el('button', 'ghost small', 'Get it');
-      btn.type = 'button';
-      btn.onclick = (e) => { e.stopPropagation(); pullModel(a, row); };
-      row.append(btn);
-      card.append(row);
-    }
-    box.append(card);
-  }
+  for (const a of shown) box.append(agentRow(a));
+  $('agents-none').classList.toggle('hidden', !!shown.length);
+  /* A filter over three things is furniture. It appears once the list is long
+     enough that finding a model is actually work. */
+  $('rail-search').classList.toggle('hidden', S.agents.length < 6);
+  $('agent-count').textContent = S.agents.length > 1 ? String(S.agents.length) : '';
 }
 
 function pullModel(a, row) {
@@ -192,7 +247,7 @@ function renderPresets(list) {
     const b = el('button', 'preset', clip(t, 44));
     b.type = 'button';
     b.title = t;
-    b.onclick = () => { $('task').value = t; $('task').focus(); };
+    b.onclick = () => { $('task').value = t; $('task').focus(); growTask(); };
     box.append(b);
   }
 }
@@ -889,6 +944,15 @@ function onNote(e) {
     try { v = JSON.parse(e.content); } catch (_) { /* keep the raw text */ }
     const ok = v.complete !== false;
     const d = el('div', 'note');
+    /* The verifier fails open so a broken one cannot trap the agent, but that
+       makes a failure look exactly like a pass. When the harness marks the
+       verdict unverified, say so rather than claiming the run checks out. */
+    if (ok && v.unverified) {
+      d.append(el('b', 'warn-tag', 'not verified'),
+               document.createTextNode(' · ' + v.unverified));
+      push('').append(d);
+      return;
+    }
     d.append(el('b', ok ? 'good-tag' : 'bad-tag',
                 ok ? 'verified complete' : 'verifier: not done'));
     if (!ok) d.append(document.createTextNode(' · ' + (v.missing || e.content)));
@@ -1209,6 +1273,53 @@ splitter.addEventListener('keydown', (ev) => {
 });
 splitter.addEventListener('dblclick', () => setSplit(50));
 
+/* --- run options --------------------------------------------------------- */
+/* The popover floats over the transcript, so the feed has to know how tall the
+   dock is or the last events sit underneath it unreachable. Measured rather
+   than assumed, because the field grows with the task text. */
+const dockEl = document.querySelector('.dock');
+new ResizeObserver(([entry]) => {
+  document.documentElement.style.setProperty('--dock-h', entry.contentRect.height + 'px');
+}).observe(dockEl);
+
+const optsBtn = $('opts-btn'), optsBox = $('opts');
+function setOpts(open) {
+  optsBox.hidden = !open;
+  optsBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (open) optsBox.querySelector('input').focus();
+}
+optsBtn.onclick = (e) => { e.stopPropagation(); setOpts(optsBox.hidden); };
+// click-away and Escape, because a popover you can only close with the button
+// that opened it is a trap
+document.addEventListener('click', (e) => {
+  if (!optsBox.hidden && !optsBox.contains(e.target) && e.target !== optsBtn) setOpts(false);
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !optsBox.hidden) { setOpts(false); optsBtn.focus(); }
+});
+
+/* The popover closes and takes any memory of what is switched on with it, so
+   the count stays behind on the bar. */
+const OPT_LABELS = { 'opt-shell': 'shell', 'opt-yolo': 'no confirm',
+                     'opt-office': 'office', 'opt-tiers': 'tiers' };
+function paintOptDots() {
+  const on = Object.keys(OPT_LABELS).filter((id) => $(id).checked).map((id) => OPT_LABELS[id]);
+  if ($('opt-root').value.trim()) on.unshift('folder');
+  const calls = $('opt-calls').value.trim();
+  if (calls) on.push(`${calls} calls`);
+  $('opt-dots').textContent = on.join(' · ');
+}
+optsBox.addEventListener('input', paintOptDots);
+optsBox.addEventListener('change', paintOptDots);
+
+/* The field grows with the text instead of scrolling inside two fixed rows. */
+const taskBox = $('task');
+function growTask() {
+  taskBox.style.height = 'auto';
+  taskBox.style.height = Math.min(taskBox.scrollHeight, 180) + 'px';
+}
+taskBox.addEventListener('input', growTask);
+
 /* Steps only. Pure presentation: nothing is dropped from the DOM, so toggling
    back mid-run loses nothing and the filter costs one class on <body>. */
 const stepsToggle = $('steps-toggle');
@@ -1242,6 +1353,10 @@ $('reset').onclick = async () => {
   await loadWorkspace();
   await loadAgents(true);
 };
+
+$('agent-filter').addEventListener('input', renderAgents);
+paintOptDots();
+growTask();
 
 loadAgents();
 setInterval(() => { if (!S.run) loadAgents(true); }, 20000);
