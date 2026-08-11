@@ -19,6 +19,7 @@ eventually issue a wrong delete_path. Choose root accordingly.
 import os
 import shutil
 import subprocess
+import sys
 
 from .tools import TOOLS
 from .world import ToolError
@@ -28,20 +29,46 @@ MAX_OUTPUT_CHARS = 4_000
 MAX_LIST_ENTRIES = 300
 COMMAND_TIMEOUT = 60
 
+def _eg(*parts):
+    """A path example in this platform's separator. The model copies these
+    verbatim, and a Windows example on POSIX makes one file literally named
+    "notes\\todo.txt" instead of todo.txt inside notes/."""
+    return os.path.join(*parts)
+
+
 _ROOT = None
 _ALLOW_SHELL = False
 _CONFIRM = None          # callable(action:str, detail:str) -> bool
 
-# Never writable, whatever the root is. Kept as lowercase prefixes.
-_DENY_WRITE = [
-    os.environ.get("SystemRoot", r"C:\Windows"),
-    os.path.join(os.environ.get("SystemDrive", "C:") + os.sep, "Program Files"),
-    os.path.join(os.environ.get("SystemDrive", "C:") + os.sep, "Program Files (x86)"),
-    r"C:\Users\Lab User\SAIL\ollama",          # model blobs
-    r"C:\Users\Lab User\SAIL\python",          # the interpreter running this
-    r"C:\Users\Lab User\SAIL\Project\results",  # the live benchmark
-    r"C:\Users\Lab User\SAIL\Project\harness",  # the agent's own engine
-]
+def _default_deny():
+    """Locations never writable, whatever the root is.
+
+    This list was Windows absolute paths only - C:\\Windows, Program Files, and
+    the lab machine's own SAIL folder. On macOS and Linux not one of them
+    exists, so the guard matched nothing and a root of "/" had no protected
+    locations at all. The system paths now follow the platform, and the two
+    entries that are about THIS project rather than the OS are derived from
+    __file__, so they hold on every machine instead of only the one the paths
+    were typed on.
+    """
+    if os.name == "nt":
+        drive = os.environ.get("SystemDrive", "C:") + os.sep
+        paths = [os.environ.get("SystemRoot", r"C:\Windows"),
+                 os.path.join(drive, "Program Files"),
+                 os.path.join(drive, "Program Files (x86)")]
+    else:
+        paths = ["/System", "/Library", "/usr", "/bin", "/sbin", "/etc", "/var",
+                 "/opt", "/boot"]
+    # The agent's own engine and the interpreter running it. An agent that can
+    # rewrite harness/ can rewrite the rules it is being held to.
+    project = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    paths += [os.path.dirname(os.path.abspath(__file__)),   # harness/
+              os.path.join(project, "webui"),
+              os.path.dirname(os.path.dirname(os.path.abspath(sys.executable)))]
+    return [p for p in paths if p]
+
+
+_DENY_WRITE = _default_deny()
 
 
 def _norm(p):
@@ -56,7 +83,7 @@ def _within(path, root):
 def _resolve(rel, write=False):
     """Resolve a model-supplied path against the root and enforce the scope."""
     if not isinstance(rel, str) or not rel.strip():
-        raise ToolError("path is required, e.g. \"notes\\\\todo.txt\"")
+        raise ToolError(f'path is required, e.g. "{_eg("notes", "todo.txt")}"')
     raw = os.path.expandvars(os.path.expanduser(rel.strip().strip('"')))
     # os.path.join returns raw unchanged when raw is already absolute
     path = os.path.abspath(os.path.join(_ROOT, raw))
@@ -208,6 +235,22 @@ def _search_files(a):
     return ("found:\n" + "\n".join(hits)) if hits else f"no matches for {query!r} under {_rel(root)}"
 
 
+def _shell_argv(cmd):
+    """How to hand one command line to this machine's shell.
+
+    It was hardcoded to powershell.exe, so shell mode raised FileNotFoundError
+    on every macOS and Linux box - the flag existed, the tool was advertised in
+    the prompt, and the first call died. SHELL is honoured when it is set so a
+    command behaves the way it does in the user's own terminal.
+    """
+    if os.name == "nt":
+        return ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", cmd]
+    return [os.environ.get("SHELL") or "/bin/sh", "-c", cmd]
+
+
+SHELL_NAME = "PowerShell" if os.name == "nt" else "shell"
+
+
 def _run_command(a):
     if not _ALLOW_SHELL:
         raise ToolError("shell access is disabled for this agent; use the file tools instead")
@@ -217,7 +260,7 @@ def _run_command(a):
     _ask("shell command", str(cmd))
     try:
         proc = subprocess.run(
-            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", str(cmd)],
+            _shell_argv(str(cmd)),
             cwd=_ROOT, capture_output=True, text=True, timeout=COMMAND_TIMEOUT)
     except subprocess.TimeoutExpired:
         raise ToolError(f"command timed out after {COMMAND_TIMEOUT}s")
@@ -235,14 +278,14 @@ _FS_TOOLS = {
     "read_file": {
         "desc": "Read the text contents of a real file on this computer.",
         "params": {"path": ("string, path to the file", True)},
-        "example": {"tool": "read_file", "args": {"path": "notes\\todo.txt"}},
+        "example": {"tool": "read_file", "args": {"path": _eg("notes", "todo.txt")}},
         "run": lambda w, m, a: _read_file(a),
     },
     "write_file": {
         "desc": "Create a real file, or replace its entire contents. Writes the exact text given.",
         "params": {"path": ("string, path to the file", True),
                    "content": ("string, the full text to write", True)},
-        "example": {"tool": "write_file", "args": {"path": "notes\\summary.txt",
+        "example": {"tool": "write_file", "args": {"path": _eg("notes", "summary.txt"),
                                                    "content": "Three meetings on Wednesday."}},
         "run": lambda w, m, a: _write_file(a),
     },
@@ -250,20 +293,20 @@ _FS_TOOLS = {
         "desc": "Add one line to the end of a real file, creating it if needed.",
         "params": {"path": ("string, path to the file", True),
                    "text": ("string, the line to add", True)},
-        "example": {"tool": "append_file", "args": {"path": "notes\\log.txt", "text": "Called Dana."}},
+        "example": {"tool": "append_file", "args": {"path": _eg("notes", "log.txt"), "text": "Called Dana."}},
         "run": lambda w, m, a: _append_file(a),
     },
     "delete_path": {
         "desc": "Delete a real file or folder. This cannot be undone, so be certain first.",
         "params": {"path": ("string, path to delete", True)},
-        "example": {"tool": "delete_path", "args": {"path": "notes\\draft.txt"}},
+        "example": {"tool": "delete_path", "args": {"path": _eg("notes", "draft.txt")}},
         "run": lambda w, m, a: _delete_path(a),
     },
     "move_path": {
         "desc": "Move or rename a real file or folder.",
         "params": {"path": ("string, what to move", True),
                    "to": ("string, the new path", True)},
-        "example": {"tool": "move_path", "args": {"path": "a.txt", "to": "archive\\a.txt"}},
+        "example": {"tool": "move_path", "args": {"path": "a.txt", "to": _eg("archive", "a.txt")}},
         "run": lambda w, m, a: _move_path(a),
     },
     "search_files": {
@@ -274,7 +317,7 @@ _FS_TOOLS = {
         "run": lambda w, m, a: _search_files(a),
     },
     "run_command": {
-        "desc": "Run one PowerShell command on this computer and read its output.",
+        "desc": f"Run one {SHELL_NAME} command on this computer and read its output.",
         "params": {"command": ("string, the command line to run", True)},
         "example": {"tool": "run_command", "args": {"command": "git status --short"}},
         "run": lambda w, m, a: _run_command(a),
@@ -301,17 +344,22 @@ def restrict_to_files():
             TOOLS.pop(name, None)
 
 
-def enable(root, allow_shell=False, confirm=None, shell_only=False):
+def enable(root, allow_shell=False, confirm=None, shell_only=False, deny=None):
     """Inject the real-filesystem tools into the shared registry, scoped to root.
+
+    `deny` adds locations that stay read-only even inside the root, on top of
+    the platform defaults.
 
     Call once at process start, before run_harness(). The benchmark never calls
     this, so bench/ keeps the original 14-tool registry.
     """
-    global _ROOT, _ALLOW_SHELL, _CONFIRM
+    global _ROOT, _ALLOW_SHELL, _CONFIRM, _DENY_WRITE
     root = os.path.abspath(os.path.expandvars(os.path.expanduser(str(root))))
     if not os.path.isdir(root):
         raise ToolError(f"working root {root} does not exist")
     _ROOT, _ALLOW_SHELL, _CONFIRM = root, allow_shell, confirm
+    _DENY_WRITE = _default_deny() + [os.path.abspath(os.path.expanduser(d))
+                                     for d in (deny or [])]
     for name, spec in _FS_TOOLS.items():
         want = not (shell_only and name != "run_command") and not (
             name == "run_command" and not allow_shell)

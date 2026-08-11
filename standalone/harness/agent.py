@@ -36,6 +36,12 @@ from .world import SIM_TODAY, SIM_TODAY_HUMAN
 MAX_CALLS = 14
 OBS_LIMIT = 2000  # observation truncation, same in both conditions
 
+# The roles this loop actually asks the LLM for. A tiered lineup may define more
+# (model_router ships a "deep" tier); anything not named here is configuration
+# the loop never reaches, and a banner should say so rather than list it as one
+# of the run's models.
+ROLES = ("driver", "router", "verifier")
+
 # Per-model harness tuning (plan/verify/loop-break/output length/...). DEFAULT
 # reproduces the benchmark harness exactly; the on-device agents swap in a
 # profile chosen for their model via set_profile(). The benchmark never sets it,
@@ -170,6 +176,40 @@ def normalize_args(name, args):
     return out
 
 
+def weekday_mismatch(task_text, args, today=None):
+    """The task names one weekday and the call carries a date that is not it.
+
+    normalize_date turns "wednesday" into the right date, but it returns
+    immediately when the model has already written a well-formed YYYY-MM-DD -
+    so a model that does the arithmetic itself and gets it wrong sails straight
+    through. Observed live: the task said Wednesday, the 8B sent 2026-07-27
+    (a Monday), list_events answered honestly for that date, and the agent told
+    a colleague their Wednesday was clear.
+
+    Returns a correction to hand back, or None. Deliberately narrow: only when
+    the task names exactly ONE weekday, so "move my Wednesday meeting to Friday"
+    is left alone. The harness never rewrites the date - it says what is wrong
+    and what the right one is, the same way it handles a bad parameter.
+    """
+    today = today or SIM_TODAY
+    named = [w for w in _WEEKDAYS if re.search(rf"\b{w}s?\b", str(task_text).lower())]
+    if len(set(named)) != 1:
+        return None
+    want = named[0]
+    value = (args or {}).get("date")
+    if not isinstance(value, str) or not re.match(r"^\d{4}-\d{2}-\d{2}$", value.strip()):
+        return None
+    try:
+        got = datetime.date.fromisoformat(value.strip())
+    except ValueError:
+        return None
+    if _WEEKDAYS[got.weekday()] == want:
+        return None
+    return (f"{value} is a {_WEEKDAYS[got.weekday()].capitalize()}, but the task says "
+            f"{want.capitalize()}. The {want.capitalize()} the task means is "
+            f"{normalize_date(want, today)}.")
+
+
 def repair_args(name, args):
     """Deterministic near-miss repair: rename close-match parameter names to
     the missing required ones, then drop unknown parameters. Returns
@@ -283,7 +323,8 @@ RESPONSE FORMAT - every reply must be exactly one JSON object:
 Rules:
 - ONE tool call per reply. No text outside the JSON object.
 - Only do what the task requires - nothing extra.
-- Look before you act: read the relevant emails or calendar before writing anything that depends on them.
+- Look before you act: read the relevant emails or calendar before writing anything
+  that depends on them. This applies even when you already believe you know the answer.
 - Dates must be YYYY-MM-DD. Times must be 24-hour HH:MM.
 - If a tool returns an ERROR, fix the arguments and try again.
 - When every part of the task is complete, call done with a short summary.
@@ -325,7 +366,14 @@ def run_harness(llm, world, mem, task_text):
     memories = mem.search(task_text, k=PROFILE.memory_k)  # only matches, no recency fallback
     memory_block = ""
     if memories:
-        memory_block = ("\n\nTHINGS YOU HAVE LEARNED PREVIOUSLY (apply them when relevant):\n"
+        # "apply them when relevant" read as instruction, and a memory outranked
+        # looking. Observed live: a run had saved "Wednesday has 0 meetings", so
+        # the agent messaged a colleague that their Wednesday was clear without
+        # opening the calendar, which held three meetings. A memory is a hint
+        # from an earlier run, not a reading of the world as it is now.
+        memory_block = ("\n\nNOTES FROM EARLIER TASKS (hints, not facts - they may be out "
+                        "of date. If one describes the inbox, the calendar or a file, "
+                        "check the real thing before you rely on it):\n"
                         + "\n".join(f"- {f}" for f in memories))
     system = HARNESS_SYSTEM.format(today=SIM_TODAY_HUMAN, shape=SHAPE,
                                    docs=tool_docs(with_examples=True),
@@ -408,6 +456,12 @@ def run_harness(llm, world, mem, task_text):
         args = normalize_args(name, args)
 
         problems = validate_call(name, args)
+        wrong_day = weekday_mismatch(task_text, args) if not problems else None
+        if wrong_day:
+            ep.invalid_calls += 1
+            give_feedback("WRONG DATE: " + wrong_day + " Reply with one corrected JSON object.",
+                          reply)
+            continue
         if problems:
             ep.invalid_calls += 1
             hint = ""
@@ -427,10 +481,19 @@ def run_harness(llm, world, mem, task_text):
         # A call may repeat up to its budget while the world is unchanged; any
         # successful write moves world_version and hands out a fresh budget,
         # because the same call can now legitimately return something new.
-        last_version, repeats = seen_calls.get(sig, (None, 0))
+        last_version, repeats, last_ok = seen_calls.get(sig, (None, 0, True))
         if last_version != world_version:
             repeats = 0
         limit = PROFILE.repeat_limit_write if name in write_tools else PROFILE.repeat_limit
+        if not last_ok:
+            # The repeat budget exists so a model can look at something twice -
+            # read the email, think, read it again. That reasoning only holds
+            # for a call that WORKED. An identical call that errored against an
+            # unchanged world will produce the identical error, so a budget of
+            # three buys three copies of the same failure. Observed live: an 8B
+            # spent three of its twenty calls on read_email("c3"), a calendar id
+            # it had mistaken for an email id.
+            limit = 1
         if PROFILE.loop_break and name != "think" and repeats >= limit:
             # Budget spent against an unchanged world: re-running it cannot
             # return anything new. If this is a verbatim repeat of the previous
@@ -439,7 +502,11 @@ def run_harness(llm, world, mem, task_text):
             if len(messages) >= 3 and messages[-3]["role"] == "assistant" \
                     and messages[-3]["content"] == reply:
                 del messages[-3:-1]
-            if limit == 1:
+            if not last_ok:
+                fb = (f"{name} with exactly those arguments already failed, and nothing has "
+                      f"changed since, so it will fail the same way. Its error is above - fix "
+                      f"the arguments or use a different tool. The task is: \"{task_text}\"")
+            elif limit == 1:
                 # byte-identical to the phrasing the benchmark runs on
                 fb = (f"You already called {name} with exactly those arguments; its result is above "
                       f"and has not changed. Do the NEXT step of the task: \"{task_text}\" "
@@ -458,7 +525,7 @@ def run_harness(llm, world, mem, task_text):
             world_version += 1
         # recorded against the world version AFTER any bump, so an identical
         # write stacked on its own result still counts as a repeat
-        seen_calls[sig] = (world_version, repeats + 1)
+        seen_calls[sig] = (world_version, repeats + 1, ok)
         if not ok:
             ep.tool_errors += 1
         obs = _obs(obs)
@@ -470,18 +537,34 @@ def run_harness(llm, world, mem, task_text):
     return ep
 
 
+VERIFY_SYSTEM = ("You are a task-completion verifier. Today is {today}.\n"
+                 "Judge ONLY the requirements stated in the task. You are not "
+                 "reviewing how the tools were called, how they could have been "
+                 "called better, or what would be nice to add: if every "
+                 "requirement the task states has a matching successful action, "
+                 "the task is complete. When in doubt, answer complete: true.")
+
+
 def _verify(llm, world, task_text):
     acts = [a for a in world.actions if a["tool"] != "think"]
     lines = []
     for a in acts:
         status = "ok" if a["ok"] else "FAILED"
-        lines.append(f"- {a['tool']}({json.dumps(a['args'], ensure_ascii=False, default=str)[:200]}) -> {status}")
+        # The result, not just the signature. Given only "create_spreadsheet(...)
+        # -> ok" a verifier cannot see that the file it asked for already
+        # exists, and it answers complete:false with an invented requirement.
+        # Observed: it sent an 8B back to redo a finished task and the rerun
+        # wrote a SECOND spreadsheet, so one task left the user two files.
+        result = str(a.get("result", ""))[:200].replace("\n", " ")
+        lines.append(f"- {a['tool']}({json.dumps(a['args'], ensure_ascii=False, default=str)[:200]}) "
+                     f"-> {status}: {result}")
     prompt = (f"TASK GIVEN TO AN ASSISTANT:\n{task_text}\n\n"
-              f"ACTIONS THE ASSISTANT TOOK:\n" + "\n".join(lines or ["(none)"])
-              + "\n\nCheck the task requirements one by one against the actions. "
-                'Respond with one JSON object: {"complete": true or false, "missing": "<what has not been done>"}')
-    msgs = [{"role": "system", "content": "You are a strict task-completion verifier. Today is "
-             + SIM_TODAY_HUMAN + "."},
+              f"ACTIONS THE ASSISTANT TOOK, WITH THEIR RESULTS:\n" + "\n".join(lines or ["(none)"])
+              + "\n\nTake each requirement the task states, in turn, and find the action "
+                "that satisfies it. Report as missing only a requirement with no such action. "
+                'Respond with one JSON object: {"complete": true or false, "missing": "<the '
+                'task requirements with no matching action, or an empty string>"}')
+    msgs = [{"role": "system", "content": VERIFY_SYSTEM.format(today=SIM_TODAY_HUMAN)},
             {"role": "user", "content": prompt}]
     # Failing open is the right call: a broken verifier must not trap the agent
     # in a loop it cannot exit. But an unmarked {"complete": true} is

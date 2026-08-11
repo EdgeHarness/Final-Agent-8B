@@ -53,7 +53,10 @@ You also have tools that act on the REAL computer, inside the working root
   file that actually exists instead of one you assumed.
 - Never delete or overwrite anything the task did not ask you to change.
 - The user is asked to confirm deletes, overwrites and shell commands. If one
-  is declined, do not retry it - choose another approach."""
+  is declined, do not retry it - choose another approach.
+- create_presentation and create_spreadsheet write .pptx and .xlsx into this
+  agent's own files folder, NOT into the working root. To put text in the
+  working root, use write_file."""
 
 MAX_TREE_ENTRIES = 400
 
@@ -223,8 +226,14 @@ def main():
         today = datetime.date.today()
         agent_mod.SIM_TODAY = today
         agent_mod.SIM_TODAY_HUMAN = today.strftime("%A, %B %d, %Y")
+    # Real-folder work costs more calls than the simulated office: the agent has
+    # to look before it writes, and a listing or a read is a whole call. It was a
+    # flat 40 for every model, which is two and a half times the 1B's own tuned
+    # budget and nearly twice the 32B's - the number was picked for the 8B and
+    # then applied to everything. Doubling the profile's budget keeps the shipped
+    # 8B agent at exactly 40 and lets the rest scale with the model.
     agent_mod.MAX_CALLS = (args.max_calls or cfg.get("max_calls")
-                           or (40 if root else profile.max_calls))
+                           or (profile.max_calls * 2 if root else profile.max_calls))
 
     world = World(os.path.join(folder, "workspace"), persistent=True)
     mem = MemoryStore(os.path.join(folder, "memory", "memory.jsonl"))
@@ -233,8 +242,15 @@ def main():
 
     tiers = None
     if router:
-        tiers = {"roles": {r: s["model"] for r, s in router.roles.items()},
-                 "resident": router.resident_models(),
+        # Split what the loop actually calls from what is merely configured. The
+        # banner listed every role in the lineup, so a run reported qwen2.5:14b
+        # as one of its models when nothing in run_harness ever asks for the
+        # "deep" role - and the tag did not have to be installed to be named.
+        used = {r: sp["model"] for r, sp in router.roles.items() if r in agent_mod.ROLES}
+        idle = {r: sp["model"] for r, sp in router.roles.items() if r not in agent_mod.ROLES}
+        tiers = {"roles": used, "unused_roles": idle,
+                 "resident": sorted({m for r, m in used.items()
+                                     if not router.roles[r].get("on_demand")}),
                  "note": adapters_note()}
     emit("banner", agent=args.agent, name=cfg["name"], model=cfg["model"],
          note=cfg.get("note", ""), budget=agent_mod.MAX_CALLS, task=args.task,

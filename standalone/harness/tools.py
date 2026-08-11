@@ -114,8 +114,12 @@ TOOLS = {
         "run": lambda w, m, a: "Noted. Continue with your next action.",
     },
     "save_memory": {
-        "desc": "Save a fact or preference to long-term memory so it persists across future tasks.",
-        "params": {"fact": ("string", True)},
+        "desc": "Save a lasting preference or fact about the user and the people they "
+                "work with, so it persists across future tasks. Only things that stay "
+                "true: who someone is, how the user likes to work. NEVER the current "
+                "contents of the inbox or calendar - those change, and a saved copy "
+                "becomes wrong without ever being corrected.",
+        "params": {"fact": ("string, something that will still be true next month", True)},
         "example": {"tool": "save_memory", "args": {"fact": "User's manager is Sam."}},
         "run": lambda w, m, a: m.save(a["fact"]),
     },

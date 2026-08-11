@@ -35,6 +35,7 @@ DEFAULT profile, so the raw-vs-harness comparison stays byte-identical to runs
 already on disk. Only the on-device agents (agents/, webui/) select a per-model
 profile — the same pattern as EXTRA_RULES / SIM_TODAY in agent.py.
 """
+import re
 from dataclasses import asdict, dataclass, fields, replace
 
 
@@ -150,19 +151,62 @@ PROFILES = {
 }
 
 
+# Parameter count out of a tag: "llama3.2:1b-instruct-q4_K_M" -> 1.0,
+# "phi4-mini:3.8b" -> 3.8. Anchored after ':' or '-' so a family version number
+# ("llama3.2") is never read as a size.
+_SIZE_RE = re.compile(r"[:\-](\d+(?:\.\d+)?)b\b", re.I)
+
+
+def size_of(tag):
+    """Billions of parameters named by a model tag, or None if it doesn't say."""
+    m = _SIZE_RE.search(str(tag or ""))
+    return float(m.group(1)) if m else None
+
+
+# Upper bound (exclusive) -> whose tuning a model of that size inherits. Size,
+# not family, is what predicts the failure mode these knobs answer to: a 1B
+# breaks JSON and loops whoever made it, and a 14B follows a plan whoever made
+# it. The tuning is borrowed; the label says so, so a banner never claims a
+# gemma is a tuned Llama.
+_SIZE_BANDS = [(2, "llama3.2:1b"), (5, "llama3.2:3b"), (11, "llama3.1:8b"),
+               (20, "qwen2.5:14b"), (float("inf"), "qwen2.5:32b")]
+
+
+def _by_size(tag):
+    """The profile for a tag with no entry of its own, chosen by parameter count.
+
+    Family alone used to decide this, taking the FIRST listed profile of a
+    matching family: llama3.2 lists 1b first, so a llama3.2:11b was handed the
+    1B's format-survival tuning - planning off, verifier off, replies capped at
+    350 tokens - which is exactly wrong for a model that size. Same-family
+    entries still win, but only when the size matches too.
+    """
+    size = size_of(tag)
+    if size is None:
+        return None
+    base = str(tag).split(":")[0]
+    same = next((p for k, p in PROFILES.items()
+                 if k.split(":")[0] == base and size_of(k) == size), None)
+    if same:
+        return same
+    for ceiling, key in _SIZE_BANDS:
+        if size < ceiling:
+            src = PROFILES[key]
+            return replace(src, label=f"{src.label} (by size)",
+                           rationale=f"No profile for this model. Tuned like {key}, "
+                                     f"the closest size the harness has measured. "
+                                     + src.rationale)
+    return None
+
+
 def for_model(tag, override=None):
     """Resolve the harness profile for a model tag.
 
-    Exact tag first, then the same base family (`llama3.2:1b-instruct-q4` ->
-    `llama3.2:1b`'s family), else DEFAULT so any new model still runs. `override`
-    is an optional dict (e.g. a config.json "harness" block) that patches
-    individual fields on top of the chosen profile.
+    Exact tag first, then by parameter count (see _by_size), else DEFAULT so any
+    new model still runs. `override` is an optional dict (e.g. a config.json
+    "harness" block) that patches individual fields on top of the chosen profile.
     """
-    prof = PROFILES.get(tag)
-    if prof is None:
-        base = str(tag).split(":")[0]
-        prof = next((v for k, v in PROFILES.items() if k.split(":")[0] == base), None)
-    prof = prof or DEFAULT
+    prof = PROFILES.get(tag) or _by_size(tag) or DEFAULT
     if isinstance(override, dict) and override:
         known = {f.name for f in fields(Profile)}
         prof = replace(prof, **{k: v for k, v in override.items() if k in known})
