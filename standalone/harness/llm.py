@@ -16,6 +16,26 @@ OLLAMA_URL = "http://127.0.0.1:11434"
 STREAM_HOOK = None
 
 
+def _check(resp, model):
+    """Raise a readable error instead of requests' bare status line.
+
+    Ollama puts the useful sentence in the response body - {"error": "model
+    'x' not found, try pulling it first"} - and raise_for_status() throws the
+    body away, so what reached the user was "404 Client Error: Not Found for
+    url http://127.0.0.1:11434/api/chat", a loopback URL nobody can act on.
+    Raised as RuntimeError so callers treat it like any other failed call; the
+    verifier's fail-open and the runner's error event both already do.
+    """
+    if resp.status_code < 400:
+        return
+    try:
+        detail = resp.json().get("error", "")
+    except ValueError:
+        detail = (resp.text or "").strip()[:200]
+    raise RuntimeError(f"the model server refused the call for {model!r}: "
+                       f"{detail or f'HTTP {resp.status_code}'}")
+
+
 class LLM:
     def __init__(self, model, num_ctx=8192, temperature=0.0, timeout=900,
                  keep_alive="30m"):
@@ -59,7 +79,7 @@ class LLM:
             content, data = self._chat_streamed(payload, hook)
         else:
             r = requests.post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=self.timeout)
-            r.raise_for_status()
+            _check(r, self.model)
             data = r.json()
             content = data["message"]["content"]
         self.calls += 1
@@ -78,7 +98,7 @@ class LLM:
         parts, final = [], {}
         with requests.post(f"{OLLAMA_URL}/api/chat", json=payload,
                            timeout=self.timeout, stream=True) as r:
-            r.raise_for_status()
+            _check(r, self.model)
             for line in r.iter_lines(decode_unicode=True):
                 if not line:
                     continue

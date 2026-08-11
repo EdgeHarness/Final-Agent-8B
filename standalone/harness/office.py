@@ -62,6 +62,9 @@ def create_presentation(files_dir, filename, slides):
     if not isinstance(slides, list) or not slides:
         raise ToolError("'slides' must be a non-empty list of objects like "
                         '{"title": "...", "bullets": ["...", "..."]}')
+    # The same value repair for slides: a bare string is a title-only slide,
+    # unambiguously, and rejecting it costs a model call to learn that.
+    slides = [{"title": s} if isinstance(s, str) else s for s in slides]
     prs = Presentation()
     prs.slide_width, prs.slide_height = Inches(13.333), Inches(7.5)  # 16:9
     W, H = prs.slide_width, prs.slide_height
@@ -148,8 +151,26 @@ def create_presentation(files_dir, filename, slides):
     return f"created {name} with {len(slides)} slide(s)"
 
 
+def _coerce_rows(rows):
+    """Deterministic value repair, the same philosophy the harness applies to
+    parameter names: fix mechanically what can be fixed mechanically, before
+    rejecting anything and spending a model call on the correction.
+
+    Models regularly send rows as a list of OBJECTS - [{"Region": "West",
+    "Amount": 1240000}, ...] - which is a perfectly unambiguous spreadsheet:
+    the keys are the header, the values are the rows. Rejecting it costs a
+    whole round trip for a shape the code can convert byte-for-byte.
+    """
+    if isinstance(rows, list) and rows and all(isinstance(r, dict) for r in rows):
+        header = list(rows[0])
+        if all(list(r) == header for r in rows):
+            return [header] + [[r[k] for k in header] for r in rows]
+    return rows
+
+
 def create_spreadsheet(files_dir, filename, rows, sheet_name=None):
     path, name = _resolve(files_dir, filename, ".xlsx")
+    rows = _coerce_rows(rows)
     if not isinstance(rows, list) or not rows or not all(isinstance(r, list) for r in rows):
         raise ToolError("'rows' must be a non-empty list of row lists, e.g. "
                         '[["Item", "Cost"], ["Laptops", 3200]]')

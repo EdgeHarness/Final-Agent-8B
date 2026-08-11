@@ -442,6 +442,30 @@ class TestOffice(unittest.TestCase):
             office.create_presentation(self.tmp.name, "d.pptx", [])
         self.assertIn("slides", str(cm.exception))
 
+    def test_rows_sent_as_objects_become_header_plus_rows(self):
+        """Models regularly send [{"Region": "West", "Amount": 1240000}, ...].
+        That is an unambiguous spreadsheet - keys are the header - and
+        rejecting it costs a whole model call to repair a shape the code can
+        convert deterministically. Same philosophy as parameter-name repair."""
+        office.create_spreadsheet(self.tmp.name, "r.xlsx",
+                                  [{"Region": "West", "Amount": 1240000},
+                                   {"Region": "East", "Amount": 845000}])
+        rows = office.read_spreadsheet(self.tmp.name, "r.xlsx")[0]["rows"]
+        self.assertEqual(rows[0], ["Region", "Amount"])
+        self.assertEqual(rows[1], ["West", 1240000])
+
+    def test_objects_with_differing_keys_are_not_guessed_at(self):
+        with self.assertRaises(ToolError):
+            office.create_spreadsheet(self.tmp.name, "bad.xlsx",
+                                      [{"a": 1}, {"b": 2}])
+
+    def test_a_bare_string_slide_is_a_title_slide(self):
+        office.create_presentation(self.tmp.name, "d.pptx",
+                                   ["Cover", {"title": "Body", "bullets": ["x"]}])
+        from pptx import Presentation
+        prs = Presentation(os.path.join(self.tmp.name, "d.pptx"))
+        self.assertEqual(len(prs.slides), 2)
+
     def test_reading_a_spreadsheet_that_was_never_made(self):
         with self.assertRaises(ToolError):
             office.read_spreadsheet(self.tmp.name, "ghost.xlsx")
@@ -508,6 +532,53 @@ class TestVerifier(unittest.TestCase):
         verdict = agent._verify(Boom(), self.world, "t")
         self.assertTrue(verdict["complete"])
         self.assertIn("ConnectionError", verdict["unverified"])
+
+
+# ---------------------------------------------------------------- llm client ---
+
+class TestLLMErrors(unittest.TestCase):
+    """A refused model call must name the model and quote the server's own
+    sentence. raise_for_status() threw the body away, so the user saw "404
+    Client Error: Not Found for url http://127.0.0.1:11434/api/chat" - a
+    loopback URL nobody can act on - while the body said "model 'x' not
+    found, try pulling it first"."""
+
+    class Resp:
+        def __init__(self, status, body=None, text=""):
+            self.status_code = status
+            self._body = body
+            self.text = text
+
+        def json(self):
+            if self._body is None:
+                raise ValueError("not json")
+            return self._body
+
+    def test_the_servers_own_sentence_reaches_the_user(self):
+        from harness.llm import _check
+        with self.assertRaises(RuntimeError) as cm:
+            _check(self.Resp(404, {"error": "model 'ghost:99b' not found, try pulling it first"}),
+                   "ghost:99b")
+        msg = str(cm.exception)
+        self.assertIn("ghost:99b", msg)
+        self.assertIn("try pulling it first", msg)
+        self.assertNotIn("127.0.0.1", msg)
+
+    def test_a_body_that_is_not_json_still_reads(self):
+        from harness.llm import _check
+        with self.assertRaises(RuntimeError) as cm:
+            _check(self.Resp(500, None, text="upstream exploded"), "m")
+        self.assertIn("upstream exploded", str(cm.exception))
+
+    def test_an_empty_body_falls_back_to_the_status(self):
+        from harness.llm import _check
+        with self.assertRaises(RuntimeError) as cm:
+            _check(self.Resp(503, None, text=""), "m")
+        self.assertIn("503", str(cm.exception))
+
+    def test_a_healthy_response_passes_silently(self):
+        from harness.llm import _check
+        _check(self.Resp(200, {"message": {}}), "m")
 
 
 # --------------------------------------------------------------- the loop ---
@@ -672,6 +743,29 @@ class TestLoop(unittest.TestCase):
                                self.world, self.mem, "do it")
         self.assertTrue(ep.finished)
         self.assertEqual(ep.done_summary, "all finished")
+
+    def test_run_raw_still_works_after_the_snapshot_restructure(self):
+        """bench/ calls run_raw and nothing else exercised it. The crash-safe
+        snapshot moved its loop into a helper; this pins the behaviour."""
+        llm = _ScriptedLLM(['{"tool": "list_emails", "args": {}}',
+                            '{"tool": "done", "args": {"summary": "listed"}}'])
+        ep = agent.run_raw(llm, self.world, self.mem, "list my emails")
+        self.assertTrue(ep.finished)
+        self.assertEqual(ep.done_summary, "listed")
+        self.assertTrue(os.path.exists(os.path.join(self.tmp.name, "state.json")))
+
+    def test_run_raw_snapshots_on_a_crash_too(self):
+        class Dies(_ScriptedLLM):
+            def chat(self, messages, **kw):
+                if self.calls >= 1:
+                    raise ConnectionError("gone")
+                return super().chat(messages, **kw)
+
+        llm = Dies(['{"tool": "send_message", "args": {"to": "sam", "text": "hi"}}'])
+        with self.assertRaises(ConnectionError):
+            agent.run_raw(llm, self.world, self.mem, "message sam")
+        state = json.load(open(os.path.join(self.tmp.name, "state.json")))
+        self.assertEqual(len(state["messages"]), 1)
 
     def test_the_budget_is_a_hard_stop(self):
         agent.set_profile(profiles.replace(profiles.DEFAULT, plan=False, verify_rounds=0))
