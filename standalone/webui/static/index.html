@@ -142,26 +142,68 @@
             <button id="run" class="primary" disabled>Run</button>
           </div>
 
-          <div class="opts" id="opts" role="dialog" aria-label="Run options" hidden>
-            <h4 class="opt-group">View</h4>
-            <label class="check">
-              <input type="checkbox" id="steps-toggle"> steps only, hide the reasoning
+          <!-- A menu of rows, not a stacked form. Every row is the same
+               height and the same shape, the label sits at the left edge of
+               each, and state reads at the right: a tick for the switches, the
+               current value for the two that take one. Checkboxes are still
+               the underlying control, just not the visible one, so keyboard
+               and screen readers get real semantics. -->
+          <div class="opts menu" id="opts" role="dialog" aria-label="Run options" hidden>
+            <label class="menu-row">
+              <input type="checkbox" id="steps-toggle">
+              <span class="menu-label">Steps only</span>
+              <span class="tick" aria-hidden="true">✓</span>
             </label>
-            <h4 class="opt-group">This run</h4>
-            <label class="opt">
-              <span>Real folder <em>optional</em></span>
-              <input type="text" id="opt-root" placeholder="leave empty for the simulated office">
+
+            <div class="menu-rule"></div>
+
+            <label class="menu-row">
+              <input type="checkbox" id="opt-shell">
+              <span class="menu-label">Allow shell commands</span>
+              <span class="tick" aria-hidden="true">✓</span>
             </label>
-            <p class="opt-note">With a folder set, the agent gets real read and write
-              file tools scoped to it, and asks you before anything destructive.</p>
-            <label class="check"><input type="checkbox" id="opt-shell"> allow shell commands</label>
-            <label class="check"><input type="checkbox" id="opt-yolo"> skip confirmations</label>
-            <label class="check"><input type="checkbox" id="opt-office"> keep office tools too</label>
-            <label class="check"><input type="checkbox" id="opt-tiers"> tiered model router</label>
-            <label class="opt inline">
-              <span>Call budget</span>
-              <input type="number" id="opt-calls" min="2" max="80" placeholder="auto">
+            <label class="menu-row">
+              <input type="checkbox" id="opt-yolo">
+              <span class="menu-label">Skip confirmations</span>
+              <span class="tick" aria-hidden="true">✓</span>
             </label>
+            <label class="menu-row">
+              <input type="checkbox" id="opt-office">
+              <span class="menu-label">Keep office tools</span>
+              <span class="tick" aria-hidden="true">✓</span>
+            </label>
+            <label class="menu-row">
+              <input type="checkbox" id="opt-tiers">
+              <span class="menu-label">Tiered model router</span>
+              <span class="tick" aria-hidden="true">✓</span>
+            </label>
+
+            <div class="menu-rule"></div>
+
+            <!-- The two rows that carry a value open in place, which is what
+                 the submenu arrow promises. <details> does it without JS. -->
+            <details class="menu-sub">
+              <summary class="menu-row">
+                <span class="menu-label">Working folder</span>
+                <span class="menu-val" id="root-val">simulated</span>
+                <span class="chev" aria-hidden="true">›</span>
+              </summary>
+              <div class="menu-body">
+                <input type="text" id="opt-root" placeholder="leave empty for the simulated office">
+                <p class="opt-note">With a folder set the agent gets real read and
+                  write file tools scoped to it, and asks before anything destructive.</p>
+              </div>
+            </details>
+            <details class="menu-sub">
+              <summary class="menu-row">
+                <span class="menu-label">Call budget</span>
+                <span class="menu-val" id="calls-set">auto</span>
+                <span class="chev" aria-hidden="true">›</span>
+              </summary>
+              <div class="menu-body">
+                <input type="number" id="opt-calls" min="2" max="80" placeholder="auto">
+              </div>
+            </details>
           </div>
         </div>
       </div>

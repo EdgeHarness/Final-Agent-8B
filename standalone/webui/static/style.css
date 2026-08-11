@@ -455,25 +455,48 @@ body.resizing { user-select: none; cursor: col-resize; }
 @keyframes pop-in { from { opacity: 0; transform: translateY(5px); } }
 @media (prefers-reduced-motion: reduce) { .opts { animation: none; } }
 .opts[hidden] { display: none; }
-.opt-group {
-  font-size: var(--t-meta); text-transform: uppercase; letter-spacing: .08em;
-  color: var(--ink-faint); font-weight: 500; margin: 0 0 8px;
+/* A menu of rows, in the shape ChatGPT uses for its + button: one row height,
+   one left edge, state at the right. The previous version was a stacked form,
+   a text input over a note over four checkboxes over a number field, each with
+   its own height and its own indent, which is what made it read as chopped. */
+.menu { padding: 6px; }
+.menu-row {
+  display: flex; align-items: center; gap: 10px;
+  height: 36px; padding: 0 10px; border-radius: var(--r-sm);
+  font-size: var(--t-sm); color: var(--ink); cursor: pointer;
+  list-style: none; user-select: none;
+  transition: background-color .1s ease;
 }
-.opt-group ~ .opt-group { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line-soft); }
-.opt { display: block; margin-top: 12px; font-size: var(--t-sm); color: var(--ink-dim); }
-.opt span { display: block; margin-bottom: 5px; }
-.opt em { color: var(--ink-faint); font-style: normal; font-size: var(--t-meta); }
-.opt.inline { display: flex; align-items: center; justify-content: space-between; }
-.opt.inline span { margin: 0; }
-.opt.inline input { width: 74px; }
-.opts input[type=text], .opts input[type=number] {
+.menu-row::-webkit-details-marker { display: none; }
+.menu-row:hover { background-color: color-mix(in srgb, currentColor 8%, transparent); }
+.menu-label { flex: 1; min-width: 0; }
+/* The checkbox stays for keyboard and screen readers; the tick is what a
+   sighted user reads, so the native box is taken out of the visual layout
+   without being taken out of the accessibility tree. */
+.menu-row input[type="checkbox"] {
+  position: absolute; opacity: 0; width: 0; height: 0; margin: 0;
+}
+.tick { color: var(--ink); opacity: 0; flex: 0 0 auto; font-size: var(--t-sm); }
+.menu-row input:checked ~ .tick { opacity: 1; }
+.menu-row:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
+.menu-rule { height: 1px; background: var(--line-soft); margin: 6px 8px; }
+
+.menu-val {
+  font-size: var(--t-meta); color: var(--ink-faint); flex: 0 0 auto;
+  max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chev { color: var(--ink-faint); flex: 0 0 auto; transition: transform .12s ease; }
+.menu-sub[open] .chev { transform: rotate(90deg); }
+.menu-sub[open] > .menu-row { background-color: color-mix(in srgb, currentColor 6%, transparent); }
+.menu-body { padding: 4px 10px 10px; }
+.menu-body input {
   width: 100%; background: var(--bg); border: 1px solid var(--line);
-  border-radius: var(--r-sm); padding: 7px 9px; font-size: var(--t-sm);
+  border-radius: var(--r-sm); padding: 7px 9px; font-size: var(--t-sm); color: var(--ink);
 }
-.opts input:focus { outline: none; border-color: var(--accent); }
-.opt-note { font-size: var(--t-meta); line-height: 1.5; color: var(--ink-faint); margin: 7px 0 4px; }
-.check { display: flex; align-items: center; gap: 7px; font-size: var(--t-sm); color: var(--ink-dim); margin-top: 7px; }
-.check input { accent-color: var(--accent); }
+.menu-body input:focus { outline: none; border-color: var(--ink-faint); }
+.opt-note {
+  font-size: var(--t-meta); line-height: 1.5; color: var(--ink-faint); margin: 8px 0 0;
+}
 
 /* ---------------------------------------------------------- left: run --- */
 

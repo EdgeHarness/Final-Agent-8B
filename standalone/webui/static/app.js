@@ -1344,10 +1344,15 @@ const OPT_LABELS = { 'opt-shell': 'shell', 'opt-yolo': 'no confirm',
                      'opt-office': 'office', 'opt-tiers': 'tiers' };
 function paintOptDots() {
   const on = Object.keys(OPT_LABELS).filter((id) => $(id).checked).map((id) => OPT_LABELS[id]);
-  if ($('opt-root').value.trim()) on.unshift('folder');
+  const root = $('opt-root').value.trim();
   const calls = $('opt-calls').value.trim();
+  if (root) on.unshift('folder');
   if (calls) on.push(`${calls} calls`);
   $('opt-dots').textContent = on.join(' · ');
+  /* The two rows that take a value show it on the row, so the menu still reads
+     as set or unset once it is closed and reopened. */
+  $('root-val').textContent = root ? root.replace(/^.*\//, '') || root : 'simulated';
+  $('calls-set').textContent = calls || 'auto';
 }
 optsBox.addEventListener('input', paintOptDots);
 optsBox.addEventListener('change', paintOptDots);
