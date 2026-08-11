@@ -735,31 +735,35 @@ function onBanner(e) {
   const n = push('act');
   n.append(el('div', 'banner-task', e.task));
 
-  const grid = el('div', 'banner-grid');
-  grid.append(el('span', 'chip-meta role-driver', e.model),
-              el('span', 'chip-meta', `${e.budget} model calls`),
-              el('span', 'chip-meta', e.toolset),
-              el('span', 'chip-meta', `today: ${e.today}`),
-              el('span', 'chip-meta', e.endpoint));
-  if (e.root) grid.append(el('span', 'chip-meta', `real folder: ${e.root}`));
-  if (e.yolo) grid.append(el('span', 'chip-meta', 'confirmations off'));
-  if (e.tiers) grid.append(el('span', 'chip-meta', `tiers: ${Object.values(e.tiers.roles).join(', ')}`));
-  n.append(grid);
-
+  /* One line of facts, not a wall. This used to print five run chips followed
+     by eight harness knobs, thirteen boxes stacked three rows deep above the
+     first thing the model said. The run line keeps what changes between runs;
+     the harness settings are fixed configuration and live behind the
+     disclosure that was already there to explain them. */
   const p = e.profile;
+  const facts = [e.model, `${e.budget} calls`, e.toolset];
+  if (p) facts.push(p.label);
+  if (e.root) facts.push(`folder: ${e.root}`);
+  if (e.yolo) facts.push('confirmations off');
+  if (e.tiers) facts.push(`tiers: ${Object.values(e.tiers.roles).join(', ')}`);
+  n.append(el('div', 'banner-facts', facts.join('  ·  ')));
+
   if (p) {
+    const det = el('details', 'harness-why');
+    det.append(el('summary', null, 'harness settings'));
     const hz = el('div', 'harness-strip');
     const knob = (on, label) => el('span', 'knob' + (on ? ' on' : ' off'), label);
-    hz.append(el('span', 'harness-name', `⚙ ${p.label}`),
-              knob(p.plan, p.plan ? `plan ≤${p.plan_max_steps}` : 'no plan'),
+    hz.append(knob(p.plan, p.plan ? `plan ≤${p.plan_max_steps}` : 'no plan'),
               knob(p.verify_rounds > 0, p.verify_rounds ? `verify ×${p.verify_rounds}` : 'no verify'),
               knob(p.loop_break, p.loop_break ? 'loop-break' : 'loops ok'),
               knob(true, `out ≤${p.num_predict}`),
               knob(true, `ctx ${(p.num_ctx / 1024).toFixed(0)}k`),
               knob(true, `think ≤${p.think_streak_cap}`),
               knob(true, `mem ${p.memory_k}`));
-    n.append(hz);
-    if (p.rationale) n.append(details('why this harness for this model', p.rationale, 'note'));
+    det.append(hz);
+    if (p.rationale) det.append(el('div', 'note', p.rationale));
+    det.append(el('div', 'note', `${e.today} · ${e.endpoint}`));
+    n.append(det);
   }
   S.banner = n;
 }

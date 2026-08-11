@@ -1,29 +1,38 @@
 /* Agent Lab — dark-first console for watching a local agent work. */
 
+/* Neutral greys, no hue in the surfaces. The previous palette was blue-tinted
+   (#0c0e13 carries visible blue) with a #5b8cff accent doing decorative work:
+   selected rows, focus rings, the active tab, the primary button and the plan
+   pointer were all the same saturated blue, so nothing coloured meant anything
+   in particular. Colour is now reserved for status alone. */
 :root {
-  --bg: #0c0e13;
-  --panel: #12151c;
-  --panel-2: #171b24;
-  --line: #232936;
-  --line-soft: #1b202a;
-  --ink: #e6e9ef;
-  --ink-dim: #9aa3b2;
-  /* This was #666e7e, which reads 3.4:1 on --panel-2 and fails AA. Only the
-     light palette had ever been checked. In a dark theme the failing case is
-     the *lightest* surface the text lands on, which is the mirror of the light
-     theme's rule, and --panel-2 is that surface. #7a8394 clears 4.5:1 on all
-     three of --bg, --panel and --panel-2. */
-  --ink-faint: #7a8394;
-  --accent: #5b8cff;
-  --accent-soft: rgba(91, 140, 255, .14);
-  --good: #3ecf8e;
-  --good-soft: rgba(62, 207, 142, .13);
-  --warn: #f0b429;
-  --warn-soft: rgba(240, 180, 41, .13);
-  --bad: #ff6b6b;
-  --bad-soft: rgba(255, 107, 107, .13);
-  --think: #b57bff;
-  --think-soft: rgba(181, 123, 255, .13);
+  --bg: #0d0d0d;
+  --panel: #171717;
+  --panel-2: #212121;
+  --line: #2f2f2f;
+  --line-soft: #242424;
+  --ink: #ececec;
+  --ink-dim: #b4b4b4;
+  /* Checked against --panel-2, the lightest surface secondary text lands on in
+     this theme: #8f8f8f clears 4.5:1 there and on both darker surfaces. In a
+     dark theme the failing case is the lightest surface, the mirror of the
+     light theme's rule. */
+  --ink-faint: #8f8f8f;
+  /* The accent is ink, not a hue. Interactive emphasis reads as contrast
+     against the greys, which is what makes a monochrome interface look
+     deliberate rather than unfinished. It flips with the theme so the primary
+     button is a light pill on dark and a dark pill on light. */
+  --accent: #ececec;
+  --accent-soft: rgba(255, 255, 255, .09);
+  --on-accent: #0d0d0d;
+  --good: #4ea67c;
+  --good-soft: rgba(78, 166, 124, .14);
+  --warn: #d99a3d;
+  --warn-soft: rgba(217, 154, 61, .14);
+  --bad: #e0625e;
+  --bad-soft: rgba(224, 98, 94, .14);
+  --think: #b4b4b4;
+  --think-soft: rgba(255, 255, 255, .07);
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
 
@@ -36,7 +45,8 @@
   --r-sm: 8px;     /* small: chips, inputs, icon buttons, results */
   --r-md: 12px;    /* medium: cards, panels, agent tiles */
   --r-lg: 16px;    /* large: the viewer modal */
-  --r-full: 999px; /* full: the ollama pill, the active tab indicator */
+  --r-xl: 20px;    /* large increased: the composer field */
+  --r-full: 999px; /* full: buttons, the status pill, the tab indicator */
   --radius: var(--r-md);   /* kept: existing rules and the renderers use it */
 
   /* BENCHMARK.md ref 14 — type scale. The old scale ran 10 -> 15px across
@@ -51,20 +61,24 @@
 
 /* Light palette declared once and applied from two places: the OS preference,
    and an explicit data-theme the user set. Duplicating the values would
-   guarantee they drift, so the OS rule only forwards to the same custom
-   properties the attribute rule uses. */
+   guarantee they drift, so both rules set the same custom properties.
+   --ink-faint here is checked against --bg, the darkest surface secondary text
+   lands on in this theme: #6b7280 clears white but only reaches 4.4:1 there,
+   so #656c79 it is. */
 @media (prefers-color-scheme: light) {
   :root:not([data-theme]) {
     color-scheme: light;
-    --bg: #f4f5f8; --panel: #ffffff; --panel-2: #f7f8fa;
-    --line: #e2e5ec; --line-soft: #eceef3;
-    /* This shipped as #8b93a1, which is 3.1:1 on white and fails WCAG AA. The
-       first fix (#6b7280) cleared white but was still 4.4:1 against --bg
-       (#f4f5f8), the surface most secondary text actually sits on. Check
-       against the darkest background a colour lands on, not the lightest.
-       #656c79 clears 4.5:1 on both. */
-    --ink: #171a20; --ink-dim: #59606e; --ink-faint: #656c79;
-    --accent-soft: rgba(91, 140, 255, .12);
+    --bg: #f7f7f7; --panel: #ffffff; --panel-2: #f0f0f0;
+    --line: #e0e0e0; --line-soft: #ececec;
+    --ink: #0d0d0d; --ink-dim: #5d5d5d; --ink-faint: #696969;
+    --accent: #0d0d0d; --accent-soft: rgba(0, 0, 0, .07); --on-accent: #ffffff;
+    --think: #5d5d5d; --think-soft: rgba(0, 0, 0, .05);
+    /* The status colours are tuned for dark surfaces and land at 2.1 to 3.0:1
+       on light ones, so the light theme carries its own darker set. A palette
+       that only checks one theme is a palette that fails in the other. */
+    --good: #276749; --good-soft: rgba(39, 103, 73, .11);
+    --warn: #7a5100; --warn-soft: rgba(122, 81, 0, .11);
+    --bad: #a52822;  --bad-soft: rgba(165, 40, 34, .10);
   }
 }
 
@@ -73,17 +87,22 @@
    above is what makes that true, rather than relying on source order. */
 :root[data-theme="light"] {
   color-scheme: light;
-  --bg: #f4f5f8; --panel: #ffffff; --panel-2: #f7f8fa;
-  --line: #e2e5ec; --line-soft: #eceef3;
-  --ink: #171a20; --ink-dim: #59606e; --ink-faint: #656c79;
-  --accent-soft: rgba(91, 140, 255, .12);
+  --bg: #f7f7f7; --panel: #ffffff; --panel-2: #f0f0f0;
+  --line: #e0e0e0; --line-soft: #ececec;
+  --ink: #0d0d0d; --ink-dim: #5d5d5d; --ink-faint: #696969;
+  --accent: #0d0d0d; --accent-soft: rgba(0, 0, 0, .07); --on-accent: #ffffff;
+  --think: #5d5d5d; --think-soft: rgba(0, 0, 0, .05);
+  --good: #276749; --good-soft: rgba(39, 103, 73, .11);
+  --warn: #7a5100; --warn-soft: rgba(122, 81, 0, .11);
+  --bad: #a52822;  --bad-soft: rgba(165, 40, 34, .10);
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #0c0e13; --panel: #12151c; --panel-2: #171b24;
-  --line: #232936; --line-soft: #1b202a;
-  --ink: #e6e9ef; --ink-dim: #9aa3b2; --ink-faint: #7a8394;
-  --accent-soft: rgba(91, 140, 255, .14);
+  --bg: #0d0d0d; --panel: #171717; --panel-2: #212121;
+  --line: #2f2f2f; --line-soft: #242424;
+  --ink: #ececec; --ink-dim: #b4b4b4; --ink-faint: #8f8f8f;
+  --accent: #ececec; --accent-soft: rgba(255, 255, 255, .09); --on-accent: #0d0d0d;
+  --think: #b4b4b4; --think-soft: rgba(255, 255, 255, .07);
 }
 
 * { box-sizing: border-box; }
@@ -264,7 +283,10 @@ body.resizing { user-select: none; cursor: col-resize; }
 /* Selection is a left edge and a surface, not a full accent-coloured box. A
    box that changes colour entirely competes with the run beside it for the
    loudest thing on screen, and the rail is navigation. */
-.agent.on { background: var(--panel-2); border-color: var(--line); border-left-color: var(--accent); }
+/* A subtle fill, no coloured edge. Selection in a navigation column is a
+   surface change, not a highlight: the row you are on should be quietly
+   obvious, not the loudest thing on the screen. */
+.agent.on { background: var(--panel-2); border-color: transparent; }
 .agent-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .agent-name { font-size: var(--t-base); font-weight: 600; letter-spacing: -.01em; }
 .agent-trail { font-size: var(--t-meta); color: var(--ink-faint); flex: 0 0 auto; }
@@ -320,40 +342,56 @@ body.resizing { user-select: none; cursor: col-resize; }
    the reading order backwards against every other transcript interface. */
 .dock { flex: 0 0 auto; border-top: 1px solid var(--line); background: var(--panel); }
 
-.composer { display: flex; gap: 10px; padding: 10px 20px 14px; align-items: flex-end; }
-.composer textarea {
-  flex: 1; resize: none; background: var(--panel); border: 1px solid var(--line);
-  border-radius: var(--r-md); padding: 11px 13px; font-size: var(--t-base); line-height: 1.5;
+/* The field is the box. The textarea inside it is chromeless, so focus lands
+   on the container and the whole thing reads as one control. */
+.composer {
+  margin: 10px 20px 16px; padding: 10px 10px 10px 14px;
+  background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: var(--r-xl); transition: border-color .12s ease;
 }
-.composer textarea:focus { outline: none; border-color: var(--accent); }
+.composer:focus-within { border-color: var(--ink-faint); }
+.composer textarea {
+  display: block; width: 100%; resize: none; background: transparent; border: 0;
+  padding: 4px 0 8px; font-size: var(--t-base); line-height: var(--lh-read);
+  color: var(--ink); max-height: 180px;
+}
+.composer textarea:focus { outline: none; }
+.composer textarea::placeholder { color: var(--ink-faint); }
 .composer-actions { display: flex; gap: 8px; align-items: center; }
+.composer-spacer { flex: 1; }
 
 /* which installed tag drives the run — amber when it is not the tag the
    agent's config.json asks for */
+/* Inside the field now, so it drops its own box and reads as a setting on the
+   input rather than a control competing with it. */
 .model-pick {
-  background: var(--panel-2); color: var(--ink-dim);
-  border: 1px solid var(--line); border-radius: var(--r-sm);
-  padding: 9px 10px; font-size: var(--t-sm);
-  max-width: 190px; cursor: pointer; margin-right: auto;
+  background: transparent; color: var(--ink-faint);
+  border: 1px solid transparent; border-radius: var(--r-full);
+  padding: 5px 8px; font-size: var(--t-meta);
+  max-width: 190px; cursor: pointer;
 }
-.model-pick:hover { color: var(--ink); border-color: var(--accent); }
-.model-pick.substituted { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
+.model-pick:hover { color: var(--ink); background: var(--accent-soft); }
+.model-pick.substituted { color: var(--warn); }
 
+/* Pills, and the primary one is filled with ink rather than a hue: on dark it
+   is a light pill, on light a dark one. Contrast carries the emphasis. */
 button.primary, button.ghost, a.ghost {
-  border-radius: var(--r-sm); padding: 10px 20px; font-size: var(--t-sm); font-weight: 600;
+  border-radius: var(--r-full); padding: 0 18px; height: 34px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: var(--t-sm); font-weight: 550;
   cursor: pointer; border: 1px solid transparent; text-decoration: none;
 }
-button.primary { background: var(--accent); color: #fff; }
+button.primary { background: var(--accent); color: var(--on-accent); }
 /* ref 11: M3 puts disabled content at 38% rather than swapping it for another
    colour, so a disabled control still reads as the same control. */
-button.primary:disabled { background: var(--line); color: var(--ink-faint); cursor: not-allowed; opacity: .62; }
-button.primary:not(:disabled):hover { filter: brightness(1.08); }
+button.primary:disabled { cursor: not-allowed; opacity: .32; }
+button.primary:not(:disabled):hover { opacity: .88; }
 button.ghost, a.ghost { background: transparent; border-color: var(--line); color: var(--ink-dim); }
 button.ghost:hover, a.ghost:hover { color: var(--ink); }
-.small { padding: 6px 12px; font-size: var(--t-meta); }
+.small { height: 26px; padding: 0 12px; font-size: var(--t-meta); }
 .icon-btn {
-  background: transparent; border: 1px solid var(--line); border-radius: var(--r-sm);
-  width: 32px; height: 32px; cursor: pointer; color: var(--ink-dim); font-size: var(--t-sm);
+  background: transparent; border: 1px solid var(--line); border-radius: var(--r-full);
+  width: 30px; height: 30px; cursor: pointer; color: var(--ink-dim); font-size: var(--t-sm);
 }
 .icon-btn:hover { color: var(--ink); }
 
@@ -401,8 +439,14 @@ button.ghost:hover, a.ghost:hover { color: var(--ink); }
   color: var(--ink-faint); border: 1px solid var(--line); background: var(--panel);
   font-family: var(--mono);
 }
-.plan .step.done { color: var(--good); border-color: var(--good); background: var(--good-soft); }
-.plan .step.now { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+/* A finished step goes quiet. It was outlined and filled in green, so a
+   four-step plan put a green band across the top of the run and green stopped
+   meaning anything by the time the end card used it. Done is the resting
+   state of this strip and should look like it; the pointer is the only thing
+   that needs to be found. */
+.plan .step.done { color: var(--ink-faint); border-color: transparent; background: transparent; }
+.plan .step.done::before { content: '✓ '; color: var(--good); }
+.plan .step.now { color: var(--ink); border-color: var(--ink-faint); background: var(--accent-soft); }
 
 /* Two ways to read a run. Default shows the reasoning, which is what proves
    the model is thinking. "Steps only" strips it to the tool calls, which is
@@ -464,28 +508,27 @@ button.ghost:hover, a.ghost:hover { color: var(--ink); }
 /* the run banner: one row of facts, not a card competing with the end card */
 .banner-task { font-size: var(--t-base); font-weight: 600; line-height: 1.35;
   letter-spacing: -.01em; margin-bottom: 6px; }
+.banner-facts {
+  font-size: var(--t-meta); color: var(--ink-faint); margin-top: 5px;
+  font-family: var(--mono);
+}
 .banner-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
 .chip-meta {
   font-family: var(--mono); font-size: var(--t-meta); padding: 2px 8px;
   border-radius: var(--r-xs); background: var(--panel-2); border: 1px solid var(--line);
   color: var(--ink-dim);
 }
-.chip-meta.role-driver { color: var(--accent); border-color: rgba(91,140,255,.35); background: var(--accent-soft); }
-.chip-meta.role-router { color: var(--think); border-color: rgba(181,123,255,.35); background: var(--think-soft); }
-.chip-meta.role-verifier { color: var(--good); border-color: rgba(62,207,142,.35); background: var(--good-soft); }
+.chip-meta.role-driver { color: var(--ink); border-color: var(--line); background: var(--accent-soft); }
+.chip-meta.role-router { color: var(--ink-dim); border-color: var(--line); background: var(--think-soft); }
+.chip-meta.role-verifier { color: var(--good); border-color: var(--line); background: var(--good-soft); }
 
-/* the model's custom harness, shown at the top of a run */
+/* the model's custom harness, behind the disclosure in the run banner */
 .harness-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
-.harness-name {
-  font-size: var(--t-meta); font-weight: 600; color: var(--think);
-  background: var(--think-soft); border: 1px solid rgba(181,123,255,.35);
-  border-radius: var(--r-xs); padding: 2px 9px;
-}
 .knob {
   font-family: var(--mono); font-size: var(--t-meta); padding: 2px 8px; border-radius: var(--r-xs);
   border: 1px solid var(--line); color: var(--ink-dim); background: var(--panel-2);
 }
-.knob.on { color: var(--good); border-color: rgba(62,207,142,.3); }
+.knob.on { color: var(--ink-dim); border-color: var(--line); }
 .knob.off { color: var(--ink-faint); text-decoration: line-through; opacity: .7; }
 
 /* live reasoning is the loud one; once it has settled it steps back a size */
@@ -545,7 +588,7 @@ pre.raw {
   height: 32px; padding: 0 16px; font-size: var(--t-sm); border-radius: var(--r-sm);
   cursor: pointer; border: 1px solid var(--line);
 }
-.confirm-actions .allow { background: var(--good); color: #06231a; border-color: transparent; font-weight: 600; }
+.confirm-actions .allow { background: var(--accent); color: var(--on-accent); border-color: transparent; font-weight: 600; }
 .confirm-actions .deny { background: transparent; color: var(--ink-dim); }
 .answered { opacity: .55; }
 
@@ -748,7 +791,7 @@ pre.raw {
   background: var(--panel-2); border-radius: var(--r-full); padding: 1px 7px;
   border: 1px solid var(--line-soft);
 }
-.count.bump { color: var(--good); border-color: rgba(62,207,142,.4); background: var(--good-soft); }
+.count.bump { color: var(--good); border-color: var(--good); background: var(--good-soft); }
 
 .items { padding: 2px 0 8px 24px; }
 .item {
