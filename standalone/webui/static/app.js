@@ -1052,11 +1052,22 @@ function onTool(e) {
 
 function onConfirm(e) {
   const n = push('act');
-  const box = el('div', 'confirm-box');
+  /* A confirmation that touches a live mailbox looked exactly like one that
+     overwrites a scratch file. Same words, same buttons, same colour, and the
+     only clue was a server id buried in the argument dump. Anything reaching a
+     real account says so first, in its own words, and in live mode says that
+     the thing on the other side is a person. */
+  const box = el('div', 'confirm-box' + (e.real ? ' real' : ''));
+  if (e.real) {
+    const sends = e.mode === 'live';
+    box.append(el('div', 'real-flag',
+      sends ? `This goes out from your real ${e.real} account. It cannot be undone.`
+            : `This touches your real ${e.real} account.`));
+  }
   box.append(el('div', 'tag', `the agent wants to ${e.action}`),
              el('div', 'note', e.detail));
   const row = el('div', 'confirm-actions');
-  const allow = el('button', 'allow', 'Allow');
+  const allow = el('button', 'allow', e.real && e.mode === 'live' ? 'Send it' : 'Allow');
   const deny = el('button', 'deny', 'Deny');
   const answer = (ok) => {
     post('/api/confirm', { id: e.id, allow: ok }).catch(() => {});

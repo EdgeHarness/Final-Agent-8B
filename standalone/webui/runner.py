@@ -163,6 +163,11 @@ class Confirmer:
     def __init__(self):
         self.n = 0
         self.declined = set()
+        # Filled in after mcp_bridge.enable(), so a confirmation can say whether
+        # it touches a real account. The dialog was identical for overwriting a
+        # scratch file and for sending mail from a live mailbox.
+        self.real_servers = set()
+        self.mode = None
 
     def __call__(self, action, detail):
         # "gmail: draft_mail {...}" -> "gmail: draft_mail". The arguments move
@@ -172,9 +177,15 @@ class Confirmer:
             emit("note", kind="feedback",
                  content=f"auto-declined: the user already refused this {action}")
             return False
+        # mcp_bridge always formats its detail as "<server-id>: <tool> {args}",
+        # so the prefix identifies a real account without changing the callback
+        # signature that fs_tools and the terminal runner also use.
+        head = str(detail).split(":", 1)[0].strip()
+        real = head if head in self.real_servers else None
         self.n += 1
         cid = self.n
-        emit("confirm", id=cid, action=action, detail=detail)
+        emit("confirm", id=cid, action=action, detail=detail,
+             real=real, mode=self.mode if real else None)
         while True:
             line = sys.stdin.readline()
             if not line:  # server went away: nobody can answer, so nothing may proceed
@@ -282,6 +293,9 @@ def main():
     if names:
         servers = mcp_config.names_to_servers(names, mcp_cfg, mode=mcp_mode)
         mcp_summary = mcp_bridge.enable(servers, confirm=confirmer, mode=mcp_mode)
+        if confirmer is not None:
+            confirmer.real_servers = {x["id"] for x in mcp_summary}
+            confirmer.mode = mcp_mode
         mcp_bridge.restrict_to_mcp(keep_office_docs=not root,
                                    keep_extra=fs_tools.injected() if root else ())
         agent_mod.EXTRA_RULES += mcp_bridge.mail_rules(mcp_mode)

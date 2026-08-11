@@ -976,6 +976,24 @@ class TestConfirmerMemory(unittest.TestCase):
         finally:
             restore()
 
+    def test_a_real_account_confirm_is_flagged_as_one(self):
+        """The dialog was identical for overwriting a scratch file and for
+        sending from a live mailbox. mcp_bridge formats its detail as
+        "<server-id>: <tool> {args}", so the prefix identifies a real account
+        without changing the callback signature fs_tools also uses."""
+        from webui import runner
+        c, restore = self.make([True, True])
+        c.real_servers = {"gmail"}
+        c.mode = "live"
+        try:
+            c("call the tool", 'gmail: send_mail {"to": "a@b.com"}')
+            c("overwrite", "/tmp/scratch.txt (12 bytes will be replaced)")
+            self.assertEqual(c._asked[0]["real"], "gmail")
+            self.assertEqual(c._asked[0]["mode"], "live")
+            self.assertIsNone(c._asked[1]["real"], "a local file is not a real account")
+        finally:
+            restore()
+
     def test_a_different_action_is_still_asked(self):
         c, restore = self.make([False, True])
         try:

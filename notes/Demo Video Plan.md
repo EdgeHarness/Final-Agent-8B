@@ -46,6 +46,33 @@ Two honest ways to ship:
 
 Decide before the voiceover is recorded, not after.
 
+### 1.2b Demo in draft mode. Do not demo live mode.
+
+The MCP bridge is wired now, so the app can reach real Gmail and Outlook. For a
+recorded demo the answer is **draft mode, or no MCP at all** - and draft is the
+better story anyway, not a compromise:
+
+- **Draft mode never shows the model a tool that can transmit.** Send, forward
+  and reply are dropped from the registry before the model sees it, so the
+  worst case on camera is a draft sitting in a Drafts folder. There is no take
+  where a wrong click mails a stranger.
+- **"The agent composes, you send" is the line you want.** It is the honest
+  description of the safety model and it is more reassuring than a demo that
+  shows an agent sending mail unattended.
+- **Live mode cannot be rehearsed.** Every take sends. There is no second
+  attempt at an email that already left.
+
+Take 5 as shot uses no MCP at all - the whole run is the simulated office - so
+it is already safe and needs no change. If you want a real-account beat, shoot
+it as a SEPARATE short segment in draft mode against a throwaway account, and
+end on the draft appearing in the real Gmail web UI. That shot is the proof,
+and it costs nothing if it goes wrong.
+
+Real-account confirmations are now visually distinct in the UI: a red card that
+names the account, and in live mode says the message cannot be undone with the
+button relabelled "Send it". That is what makes a live demo *possible*; it is
+still not what makes it *wise*.
+
 ### 1.3 The run is faster than the narration
 
 Measured end to end against the shim: **10.7 seconds, 7 model calls**, from

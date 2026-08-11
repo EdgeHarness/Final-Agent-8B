@@ -976,6 +976,14 @@ pre.raw {
   font-size: var(--t-meta); letter-spacing: .07em; text-transform: uppercase;
   font-weight: 600; color: var(--warn);
 }
+/* A real account is the one case where the dialog must not look routine. */
+.confirm-box.real { border-color: var(--bad); background: var(--bad-soft); }
+.confirm-box.real .allow { background: var(--bad); border-color: transparent; color: #fff; }
+.real-flag {
+  font-size: var(--t-sm); font-weight: 600; color: var(--bad);
+  margin-bottom: 6px;
+}
+
 .confirm-actions { display: flex; gap: 8px; margin-top: 10px; }
 .confirm-actions button {
   height: 32px; padding: 0 16px; font-size: var(--t-sm); border-radius: var(--r-sm);
