@@ -323,6 +323,19 @@ def run_raw(llm, world, mem, task_text):
     ep.note("system", system)
     ep.note("task", task_text)
 
+    try:
+        _raw_loop(llm, world, mem, ep, messages)
+    finally:
+        # Snapshot no matter how the loop ended. Without this, a crash mid-run
+        # (ollama dying, a network error) lost every world mutation: the UI had
+        # already told the user "send_message - written", but state.json was
+        # only written on clean exit, so after a restart the sent message had
+        # never happened.
+        world.snapshot()
+    return ep
+
+
+def _raw_loop(llm, world, mem, ep, messages):
     while llm.calls < MAX_CALLS:
         reply = llm.chat(messages, force_json=False)
         messages.append({"role": "assistant", "content": reply})
@@ -347,8 +360,6 @@ def run_raw(llm, world, mem, task_text):
         obs = _obs(obs)
         messages.append({"role": "user", "content": f"OBSERVATION: {obs}"})
         ep.note("observation", obs)
-    world.snapshot()
-    return ep
 
 
 # --------------------------------------------------------------- HARNESS ----
@@ -478,6 +489,17 @@ def run_harness(llm, world, mem, task_text):
                                   None)
     looked = False
     nudged_to_look = False
+    # The other half of holding the model to its own plan. Observed live: asked
+    # only to "list my emails", an 8B read one, then SENT an email, added a
+    # calendar event and messaged a third party - four side effects for a
+    # read-only request, and every surface reported success. Harmless against
+    # the simulation; real mail the moment a live account is wired. A write the
+    # plan never named is questioned once, then allowed if the model insists -
+    # the same contract as the read-before-write nudge: the harness questions,
+    # it never forbids. Only armed when a plan exists, and save_memory is
+    # exempt (remembering is never a side effect on another person).
+    planned_set = set(planned)
+    questioned_writes = set()
     last_reply = None
     think_streak = 0
 
@@ -493,135 +515,152 @@ def run_harness(llm, world, mem, task_text):
         ep.note("feedback", fb)
         last_reply = reply
 
-    while llm.calls < MAX_CALLS:
-        reply = llm.chat(messages, force_json=True, num_predict=PROFILE.num_predict,
-                         role="driver")
-        messages.append({"role": "assistant", "content": reply})
-        ep.note("model", reply)
-        obj, err = parse_lenient(reply)
-        if obj is None:
-            ep.parse_failures += 1
-            give_feedback(f"FORMAT ERROR: {err}. Reply with exactly one JSON object: {SHAPE}", reply)
-            continue
-        name = str(obj.get("tool") or obj.get("name") or "").strip()
-        args = obj.get("args") if isinstance(obj.get("args"), dict) else {}
-        if not args:
-            # repair: models sometimes put args at the top level next to "tool"
-            args = {k: v for k, v in obj.items() if k not in ("tool", "name", "thought", "args")}
+    # try/finally, not a call at the end: a crash mid-run (ollama dying, a
+    # network error) used to lose every world mutation, because the snapshot
+    # only ran on clean exit. The UI had already told the user a write
+    # succeeded; after a restart it had never happened.
+    try:
+        while llm.calls < MAX_CALLS:
+            reply = llm.chat(messages, force_json=True, num_predict=PROFILE.num_predict,
+                             role="driver")
+            messages.append({"role": "assistant", "content": reply})
+            ep.note("model", reply)
+            obj, err = parse_lenient(reply)
+            if obj is None:
+                ep.parse_failures += 1
+                give_feedback(f"FORMAT ERROR: {err}. Reply with exactly one JSON object: {SHAPE}", reply)
+                continue
+            name = str(obj.get("tool") or obj.get("name") or "").strip()
+            args = obj.get("args") if isinstance(obj.get("args"), dict) else {}
+            if not args:
+                # repair: models sometimes put args at the top level next to "tool"
+                args = {k: v for k, v in obj.items() if k not in ("tool", "name", "thought", "args")}
 
-        if name == "done":
-            if verify_rounds < PROFILE.verify_rounds and llm.calls < MAX_CALLS:
-                verify_rounds += 1
-                verdict = _verify(llm, world, task_text)
-                ep.note("verify", json.dumps(verdict, ensure_ascii=False))
-                if not verdict.get("complete", True):
-                    give_feedback("VERIFIER: the task is NOT finished yet. Missing: "
-                                  f"{verdict.get('missing', 'unknown')}. Continue with the next tool call.",
-                                  reply)
-                    continue
-            ep.done_summary = str(args.get("summary", ""))
-            ep.finished = True
-            ep.note("done", ep.done_summary)
-            break
+            if name == "done":
+                if verify_rounds < PROFILE.verify_rounds and llm.calls < MAX_CALLS:
+                    verify_rounds += 1
+                    verdict = _verify(llm, world, task_text)
+                    ep.note("verify", json.dumps(verdict, ensure_ascii=False))
+                    if not verdict.get("complete", True):
+                        give_feedback("VERIFIER: the task is NOT finished yet. Missing: "
+                                      f"{verdict.get('missing', 'unknown')}. Continue with the next tool call.",
+                                      reply)
+                        continue
+                ep.done_summary = str(args.get("summary", ""))
+                ep.finished = True
+                ep.note("done", ep.done_summary)
+                break
 
-        args, fixes = repair_args(name, args)
-        if fixes:
-            ep.note("repair", "; ".join(fixes))
-        args = normalize_args(name, args)
+            args, fixes = repair_args(name, args)
+            if fixes:
+                ep.note("repair", "; ".join(fixes))
+            args = normalize_args(name, args)
 
-        problems = validate_call(name, args)
-        wrong_day = task_date_mismatch(task_text, args) if not problems else None
-        if wrong_day:
-            ep.invalid_calls += 1
-            give_feedback("WRONG DATE: " + wrong_day + " Reply with one corrected JSON object.",
-                          reply)
-            continue
-        if problems:
-            ep.invalid_calls += 1
-            hint = ""
-            if name in TOOLS:
-                hint = " Correct shape: " + json.dumps(TOOLS[name]["example"], ensure_ascii=False)
-            else:
-                close = difflib.get_close_matches(name, TOOLS.keys(), n=1)
-                if close:
-                    hint = (f" Did you mean '{close[0]}'? Correct shape: "
-                            + json.dumps(TOOLS[close[0]]["example"], ensure_ascii=False))
-            give_feedback("INVALID CALL: " + "; ".join(problems) + "." + hint
-                          + " Reply with one corrected JSON object.", reply)
-            continue
-        last_reply = reply
+            problems = validate_call(name, args)
+            wrong_day = task_date_mismatch(task_text, args) if not problems else None
+            if wrong_day:
+                ep.invalid_calls += 1
+                give_feedback("WRONG DATE: " + wrong_day + " Reply with one corrected JSON object.",
+                              reply)
+                continue
+            if problems:
+                ep.invalid_calls += 1
+                hint = ""
+                if name in TOOLS:
+                    hint = " Correct shape: " + json.dumps(TOOLS[name]["example"], ensure_ascii=False)
+                else:
+                    close = difflib.get_close_matches(name, TOOLS.keys(), n=1)
+                    if close:
+                        hint = (f" Did you mean '{close[0]}'? Correct shape: "
+                                + json.dumps(TOOLS[close[0]]["example"], ensure_ascii=False))
+                give_feedback("INVALID CALL: " + "; ".join(problems) + "." + hint
+                              + " Reply with one corrected JSON object.", reply)
+                continue
+            last_reply = reply
 
-        # One nudge, never a block: if it insists, the next identical call runs.
-        if (first_read_planned and not looked and not nudged_to_look
-                and name in write_tools and name != "save_memory"):
-            nudged_to_look = True
-            give_feedback(
-                f"You planned to call {first_read_planned} first and have not read "
-                f"anything yet, so {name} would be writing from memory rather than "
-                f"from the task's own data. Call {first_read_planned} first. If you "
-                f"genuinely do not need it, call {name} again and it will run.",
-                reply)
-            continue
+            if (planned_set and name in write_tools and name != "save_memory"
+                    and name not in planned_set and name not in questioned_writes):
+                questioned_writes.add(name)
+                give_feedback(
+                    f"Your plan for this task never included {name}, and the task is: "
+                    f"\"{task_text}\". Only do what the task requires - nothing extra. "
+                    f"If {name} is genuinely needed, call it again and it will run; "
+                    f"otherwise continue with the plan or call done.",
+                    reply)
+                continue
 
-        sig = json.dumps({"t": name, "a": args}, sort_keys=True, default=str)
-        # A call may repeat up to its budget while the world is unchanged; any
-        # successful write moves world_version and hands out a fresh budget,
-        # because the same call can now legitimately return something new.
-        last_version, repeats, last_ok = seen_calls.get(sig, (None, 0, True))
-        if last_version != world_version:
-            repeats = 0
-        limit = PROFILE.repeat_limit_write if name in write_tools else PROFILE.repeat_limit
-        if not last_ok:
-            # The repeat budget exists so a model can look at something twice -
-            # read the email, think, read it again. That reasoning only holds
-            # for a call that WORKED. An identical call that errored against an
-            # unchanged world will produce the identical error, so a budget of
-            # three buys three copies of the same failure. Observed live: an 8B
-            # spent three of its twenty calls on read_email("c3"), a calendar id
-            # it had mistaken for an email id.
-            limit = 1
-        if PROFILE.loop_break and name != "think" and repeats >= limit:
-            # Budget spent against an unchanged world: re-running it cannot
-            # return anything new. If this is a verbatim repeat of the previous
-            # exchange, delete the older copy (repetition in context is an
-            # attractor for small models).
-            if len(messages) >= 3 and messages[-3]["role"] == "assistant" \
-                    and messages[-3]["content"] == reply:
-                del messages[-3:-1]
+            # One nudge, never a block: if it insists, the next identical call runs.
+            if (first_read_planned and not looked and not nudged_to_look
+                    and name in write_tools and name != "save_memory"):
+                nudged_to_look = True
+                give_feedback(
+                    f"You planned to call {first_read_planned} first and have not read "
+                    f"anything yet, so {name} would be writing from memory rather than "
+                    f"from the task's own data. Call {first_read_planned} first. If you "
+                    f"genuinely do not need it, call {name} again and it will run.",
+                    reply)
+                continue
+
+            sig = json.dumps({"t": name, "a": args}, sort_keys=True, default=str)
+            # A call may repeat up to its budget while the world is unchanged; any
+            # successful write moves world_version and hands out a fresh budget,
+            # because the same call can now legitimately return something new.
+            last_version, repeats, last_ok = seen_calls.get(sig, (None, 0, True))
+            if last_version != world_version:
+                repeats = 0
+            limit = PROFILE.repeat_limit_write if name in write_tools else PROFILE.repeat_limit
             if not last_ok:
-                fb = (f"{name} with exactly those arguments already failed, and nothing has "
-                      f"changed since, so it will fail the same way. Its error is above - fix "
-                      f"the arguments or use a different tool. The task is: \"{task_text}\"")
-            elif limit == 1:
-                # byte-identical to the phrasing the benchmark runs on
-                fb = (f"You already called {name} with exactly those arguments; its result is above "
-                      f"and has not changed. Do the NEXT step of the task: \"{task_text}\" "
-                      f"If everything is complete, call done.")
-            else:
-                fb = (f"You have called {name} with exactly those arguments {repeats} times now; "
-                      f"its result is above and has not changed. Do the NEXT step of the task: "
-                      f"\"{task_text}\" If everything is complete, call done.")
-            messages.append({"role": "user", "content": fb})
-            ep.note("feedback", fb)
-            continue
-        think_streak = think_streak + 1 if name == "think" else 0
+                # The repeat budget exists so a model can look at something twice -
+                # read the email, think, read it again. That reasoning only holds
+                # for a call that WORKED. An identical call that errored against an
+                # unchanged world will produce the identical error, so a budget of
+                # three buys three copies of the same failure. Observed live: an 8B
+                # spent three of its twenty calls on read_email("c3"), a calendar id
+                # it had mistaken for an email id.
+                limit = 1
+            if PROFILE.loop_break and name != "think" and repeats >= limit:
+                # Budget spent against an unchanged world: re-running it cannot
+                # return anything new. If this is a verbatim repeat of the previous
+                # exchange, delete the older copy (repetition in context is an
+                # attractor for small models).
+                if len(messages) >= 3 and messages[-3]["role"] == "assistant" \
+                        and messages[-3]["content"] == reply:
+                    del messages[-3:-1]
+                if not last_ok:
+                    fb = (f"{name} with exactly those arguments already failed, and nothing has "
+                          f"changed since, so it will fail the same way. Its error is above - fix "
+                          f"the arguments or use a different tool. The task is: \"{task_text}\"")
+                elif limit == 1:
+                    # byte-identical to the phrasing the benchmark runs on
+                    fb = (f"You already called {name} with exactly those arguments; its result is above "
+                          f"and has not changed. Do the NEXT step of the task: \"{task_text}\" "
+                          f"If everything is complete, call done.")
+                else:
+                    fb = (f"You have called {name} with exactly those arguments {repeats} times now; "
+                          f"its result is above and has not changed. Do the NEXT step of the task: "
+                          f"\"{task_text}\" If everything is complete, call done.")
+                messages.append({"role": "user", "content": fb})
+                ep.note("feedback", fb)
+                continue
+            think_streak = think_streak + 1 if name == "think" else 0
 
-        ok, obs = execute(name, args, world, mem)
-        if ok and name not in write_tools and name != "think":
-            looked = True
-        if ok and name in write_tools:
-            world_version += 1
-        # recorded against the world version AFTER any bump, so an identical
-        # write stacked on its own result still counts as a repeat
-        seen_calls[sig] = (world_version, repeats + 1, ok)
-        if not ok:
-            ep.tool_errors += 1
-        obs = _obs(obs)
-        if think_streak >= PROFILE.think_streak_cap:
-            obs += " NOTE: stop thinking and take a concrete action now."
-        messages.append({"role": "user", "content": f"OBSERVATION: {obs}"})
-        ep.note("observation", obs)
-    world.snapshot()
+            ok, obs = execute(name, args, world, mem)
+            if ok and name not in write_tools and name != "think":
+                looked = True
+            if ok and name in write_tools:
+                world_version += 1
+            # recorded against the world version AFTER any bump, so an identical
+            # write stacked on its own result still counts as a repeat
+            seen_calls[sig] = (world_version, repeats + 1, ok)
+            if not ok:
+                ep.tool_errors += 1
+            obs = _obs(obs)
+            if think_streak >= PROFILE.think_streak_cap:
+                obs += " NOTE: stop thinking and take a concrete action now."
+            messages.append({"role": "user", "content": f"OBSERVATION: {obs}"})
+            ep.note("observation", obs)
+    finally:
+        world.snapshot()
     return ep
 
 

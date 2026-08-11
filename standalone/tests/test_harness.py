@@ -620,6 +620,52 @@ class TestLoop(unittest.TestCase):
         agent.run_harness(llm, self.world, self.mem, "spreadsheet of my July receipts")
         self.assertFalse([n for n in llm.seen_feedback if "writing from memory" in n])
 
+    def test_a_crash_mid_run_still_snapshots_the_world(self):
+        """A mid-run crash (ollama dying) used to lose every world mutation:
+        the UI had already reported "send_message - written", but state.json
+        was only written on clean exit, so after a restart the sent message
+        had never happened."""
+        agent.set_profile(profiles.replace(profiles.DEFAULT, plan=False, verify_rounds=0))
+
+        class DiesAfterOne(_ScriptedLLM):
+            def chat(self, messages, **kw):
+                if self.calls >= 1:
+                    raise ConnectionError("ollama died")
+                return super().chat(messages, **kw)
+
+        llm = DiesAfterOne([self.call("send_message", to="sam", text="hi")])
+        with self.assertRaises(ConnectionError):
+            agent.run_harness(llm, self.world, self.mem, "message sam")
+        state = json.load(open(os.path.join(self.tmp.name, "state.json")))
+        self.assertEqual(len(state["messages"]), 1)
+
+    def test_an_unplanned_write_is_questioned_once_then_allowed(self):
+        """Asked only to "list my emails", an 8B sent an email, added an event
+        and messaged a third party. A write the model's own plan never named is
+        questioned once; if it insists, it runs - question, never forbid."""
+        agent.set_profile(profiles.replace(profiles.DEFAULT, plan=True, verify_rounds=0))
+        plan = '{"steps": [{"tool": "list_emails", "what": "list them"}]}'
+        llm = _ScriptedLLM([plan,
+                            self.call("list_emails"),
+                            self.call("send_message", to="sam", text="fyi"),   # questioned
+                            self.call("send_message", to="sam", text="fyi"),   # insists: runs
+                            self.call("done", summary="done")])
+        agent.run_harness(llm, self.world, self.mem, "List my emails")
+        self.assertEqual(len(self.world.messages), 1)
+        nudges = [f for f in llm.seen_feedback if "never included send_message" in f]
+        self.assertEqual(len(nudges), 1)
+
+    def test_a_planned_write_is_never_questioned(self):
+        agent.set_profile(profiles.replace(profiles.DEFAULT, plan=True, verify_rounds=0))
+        plan = ('{"steps": [{"tool": "list_emails", "what": "read"}, '
+                '{"tool": "send_message", "what": "tell sam"}]}')
+        llm = _ScriptedLLM([plan, self.call("list_emails"),
+                            self.call("send_message", to="sam", text="update"),
+                            self.call("done", summary="done")])
+        agent.run_harness(llm, self.world, self.mem, "tell Sam about my inbox")
+        self.assertEqual(len(self.world.messages), 1)
+        self.assertFalse([f for f in llm.seen_feedback if "never included" in f])
+
     def test_done_ends_the_run_and_keeps_the_summary(self):
         agent.set_profile(profiles.replace(profiles.DEFAULT, plan=False, verify_rounds=0))
         ep = agent.run_harness(_ScriptedLLM([self.call("done", summary="all finished")]),
