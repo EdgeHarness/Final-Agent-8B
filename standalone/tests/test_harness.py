@@ -932,6 +932,60 @@ class TestServerGuards(unittest.TestCase):
         self.assertEqual(cm.exception.code, 143)
 
 
+class TestConfirmerMemory(unittest.TestCase):
+    """A decline is a decision, not a transient failure. Observed live against
+    a real MCP server: a declined draft was re-attempted three times, putting
+    the same dialog in front of the person three times after they said no and
+    spending 22 of the run's calls. The model reworded its arguments slightly
+    each time, which is why the loop's signature dedupe cannot catch it."""
+
+    def make(self, answers):
+        from webui import runner
+        c = runner.Confirmer()
+        c._asked = []
+        import io
+        c._answers = list(answers)
+
+        def fake_readline():
+            return json.dumps({"id": c.n, "allow": c._answers.pop(0)}) + "\n"
+
+        saved_stdin, saved_emit = runner.sys.stdin, runner.emit
+        runner.sys.stdin = type("S", (), {"readline": staticmethod(fake_readline)})()
+        runner.emit = lambda ev, **f: c._asked.append(f) if ev == "confirm" else None
+        return c, (lambda: (setattr(runner.sys, "stdin", saved_stdin),
+                            setattr(runner, "emit", saved_emit)))
+
+    def test_a_declined_action_is_never_asked_twice(self):
+        c, restore = self.make([False])
+        try:
+            first = c("call the tool", 'gmail: draft_mail {"to": "a@b.com"}')
+            second = c("call the tool", 'gmail: draft_mail {"to": "a@b.com", "body": "reworded"}')
+            self.assertFalse(first)
+            self.assertFalse(second)
+            self.assertEqual(len(c._asked), 1, "the person was asked twice")
+        finally:
+            restore()
+
+    def test_an_allowed_action_may_be_asked_again(self):
+        """Saying yes once does not blanket-authorize every later call."""
+        c, restore = self.make([True, True])
+        try:
+            self.assertTrue(c("call the tool", 'gmail: draft_mail {"to": "a"}'))
+            self.assertTrue(c("call the tool", 'gmail: draft_mail {"to": "b"}'))
+            self.assertEqual(len(c._asked), 2)
+        finally:
+            restore()
+
+    def test_a_different_action_is_still_asked(self):
+        c, restore = self.make([False, True])
+        try:
+            c("call the tool", 'gmail: draft_mail {"to": "a"}')
+            self.assertTrue(c("call the tool", 'gmail: modify_mail {"id": "1"}'))
+            self.assertEqual(len(c._asked), 2)
+        finally:
+            restore()
+
+
 # ------------------------------------------------------------------- runner ---
 
 class TestRunner(unittest.TestCase):

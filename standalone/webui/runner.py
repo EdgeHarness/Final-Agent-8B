@@ -146,25 +146,49 @@ def world_snapshot(world, mem, root=None):
 
 class Confirmer:
     """Ask the browser instead of the terminal. Emits a confirm event and
-    blocks until the server writes the answer to stdin."""
+    blocks until the server writes the answer to stdin.
+
+    A decline is remembered. Every caller's ToolError already tells the model
+    not to retry a declined call, but nothing enforced it: observed live
+    against a real MCP server, a declined draft was re-attempted three times,
+    which put the SAME dialog in front of the person three times after they had
+    said no, and spent 22 of the run's calls doing it. Re-asking a question
+    already answered is the bug; the model rewording its arguments slightly
+    each time is why signature-based dedupe in the loop cannot catch it.
+
+    Keyed on the action and the tool, not the exact wording, for that reason.
+    Lives here rather than in fs_tools or mcp_bridge because both take this one
+    callback, so one guard covers every module that asks."""
 
     def __init__(self):
         self.n = 0
+        self.declined = set()
 
     def __call__(self, action, detail):
+        # "gmail: draft_mail {...}" -> "gmail: draft_mail". The arguments move
+        # between attempts; the decision was about the action.
+        key = (action, str(detail).split("{")[0].strip())
+        if key in self.declined:
+            emit("note", kind="feedback",
+                 content=f"auto-declined: the user already refused this {action}")
+            return False
         self.n += 1
         cid = self.n
         emit("confirm", id=cid, action=action, detail=detail)
         while True:
             line = sys.stdin.readline()
-            if not line:  # server went away
+            if not line:  # server went away: nobody can answer, so nothing may proceed
+                self.declined.add(key)
                 return False
             try:
                 ans = json.loads(line)
             except ValueError:
                 continue
             if ans.get("id") == cid:
-                return bool(ans.get("allow"))
+                allow = bool(ans.get("allow"))
+                if not allow:
+                    self.declined.add(key)
+                return allow
 
 
 # -------------------------------------------------------------------- run ----
