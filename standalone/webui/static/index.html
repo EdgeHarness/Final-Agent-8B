@@ -5,10 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Agent Lab</title>
 <link rel="stylesheet" href="/static/style.css">
-<!-- The circled A from the logo, on the logo's own dark tile. A favicon cannot
-     be recoloured by CSS, so it ships with a background rather than as white
-     on transparent, which would vanish against a light browser chrome. -->
-<link rel="icon" href="/static/favicon.png" type="image/png">
+<!-- The circled A, transparent, so the tab strip's own colour shows through
+     instead of a black tile sitting in the middle of it. An SVG favicon can
+     answer prefers-color-scheme, so the mark inks itself dark or light to suit
+     the browser; the PNG below is the tiled fallback for anything that will
+     not take an SVG here, and browsers that do take one never fetch it. -->
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="alternate icon" href="/static/favicon.png" type="image/png">
 </head>
 <body>
 
