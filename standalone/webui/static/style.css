@@ -239,27 +239,46 @@ body.resizing { user-select: none; cursor: col-resize; }
 .rail-title { font-size: var(--t-meta); text-transform: uppercase; letter-spacing: .09em; color: var(--ink-faint); }
 .rail-hint { margin: 6px 0 14px; font-size: var(--t-sm); line-height: 1.5; color: var(--ink-faint); }
 
-.agents { display: flex; flex-direction: column; gap: 8px; }
+/* BENCHMARK.md ref 15 — M3 list anatomy. A list item is a fixed set of slots:
+   leading, content (overline / label / supporting text) and trailing. Every
+   item fills the same slots, which is what makes a list scannable.
+   These rows had no skeleton. A name, a speed word, a mono model tag, a purple
+   profile chip, three loose counts and a two-sentence blurb, each with its own
+   size and colour, arranged per card to suit whatever that card happened to
+   carry. Six text treatments in a 90px box.
+   Now: label + trailing on one line, supporting text under it, one dot-joined
+   metadata line, and the blurb only on the selected row. Four lines, three
+   treatments, identical in every row. */
+.agents { display: flex; flex-direction: column; gap: 2px; }
 .agent {
   text-align: left; width: 100%; cursor: pointer;
-  background: var(--panel-2); border: 1px solid var(--line);
-  border-radius: var(--r-md); padding: 10px 12px;
-  transition: border-color .15s, background .15s;
+  background: transparent; border: 1px solid transparent;
+  border-left: 2px solid transparent;
+  border-radius: var(--r-sm); padding: 9px 11px;
+  /* a <button> does not inherit font-size, so without this the row sits at the
+     UA default of 13.33px: a sixth type size nobody chose */
+  font-size: var(--t-sm);
+  transition: background-color .12s ease, border-color .12s ease;
 }
-.agent:hover { background-color: color-mix(in srgb, var(--ink) 6%, var(--panel-2)); }
-.agent.on { border-color: var(--accent); background: var(--accent-soft); }
-.agent-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.agent-size { font-size: var(--t-base); font-weight: 600; letter-spacing: -.01em; }
-.agent-speed { font-size: var(--t-meta); color: var(--ink-faint); }
-.agent-model { font-family: var(--mono); font-size: var(--t-meta); color: var(--ink-dim); margin-top: 3px; }
-.agent-profile { font-size: var(--t-meta); color: var(--think); margin-top: 5px; }
-.agent-stats { display: flex; gap: 9px; margin-top: 7px; font-size: var(--t-meta); color: var(--ink-faint); }
-.agent-blurb { display: none; font-size: var(--t-sm); line-height: 1.45; color: var(--ink-dim); margin-top: 8px; }
+.agent:hover { background-color: color-mix(in srgb, currentColor 6%, transparent); }
+/* Selection is a left edge and a surface, not a full accent-coloured box. A
+   box that changes colour entirely competes with the run beside it for the
+   loudest thing on screen, and the rail is navigation. */
+.agent.on { background: var(--panel-2); border-color: var(--line); border-left-color: var(--accent); }
+.agent-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.agent-name { font-size: var(--t-base); font-weight: 600; letter-spacing: -.01em; }
+.agent-trail { font-size: var(--t-meta); color: var(--ink-faint); flex: 0 0 auto; }
+.agent-support {
+  font-family: var(--mono); font-size: var(--t-meta); color: var(--ink-dim); margin-top: 2px;
+}
+.agent-meta { font-size: var(--t-meta); color: var(--ink-faint); margin-top: 5px; }
+.agent-blurb { display: none; font-size: var(--t-sm); line-height: 1.5; color: var(--ink-dim); margin-top: 8px; }
 .agent.on .agent-blurb { display: block; }
 .agent-missing {
-  display: flex; align-items: center; gap: 6px; margin-top: 8px;
+  display: flex; align-items: center; gap: 8px; margin-top: 8px;
   font-size: var(--t-meta); color: var(--warn);
 }
+.agent-missing .ghost { padding: 3px 10px; font-size: var(--t-meta); }
 .pull-bar { height: 3px; border-radius: var(--r-xs); background: var(--line); overflow: hidden; margin-top: 6px; }
 .pull-bar i {
   display: block; height: 100%; width: 100%; background: var(--warn);
@@ -296,7 +315,12 @@ body.resizing { user-select: none; cursor: col-resize; }
 .run { display: flex; flex-direction: column; min-width: 0; min-height: 0;
   border-right: 1px solid var(--line); }
 
-.composer { display: flex; gap: 10px; padding: 14px 20px 8px; align-items: flex-end; }
+/* The input docks under the transcript it appends to. It used to sit above the
+   feed, which put the newest event furthest from the box you type into and ran
+   the reading order backwards against every other transcript interface. */
+.dock { flex: 0 0 auto; border-top: 1px solid var(--line); background: var(--panel); }
+
+.composer { display: flex; gap: 10px; padding: 10px 20px 14px; align-items: flex-end; }
 .composer textarea {
   flex: 1; resize: none; background: var(--panel); border: 1px solid var(--line);
   border-radius: var(--r-md); padding: 11px 13px; font-size: var(--t-base); line-height: 1.5;
@@ -333,13 +357,29 @@ button.ghost:hover, a.ghost:hover { color: var(--ink); }
 }
 .icon-btn:hover { color: var(--ink); }
 
-.presets { display: flex; gap: 6px; flex-wrap: wrap; padding: 0 20px 10px; }
+/* One row that scrolls sideways. Wrapped, six suggestions took five rows and
+   more vertical space than the transcript above them, which made the examples
+   read as the main content of the pane instead of a way in.
+   The mask fades the right edge so a cut-off chip signals "there is more"
+   rather than looking like a rendering fault. */
+.presets {
+  display: flex; gap: 6px; flex-wrap: nowrap; padding: 12px 20px 2px;
+  overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+  scroll-snap-type: x proximity; overscroll-behavior-x: contain;
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+}
+.presets::-webkit-scrollbar { display: none; }
+/* The mask would clip a focus ring drawn on the last chip, so the row keeps
+   enough right padding for the ring to sit inside the fade. */
+.presets::after { content: ''; flex: 0 0 20px; }
 /* ref 13 — M3 assist chip: 8dp corner, 16dp side padding, 8dp between
    elements, at desktop density (one 4dp step down from the 32dp height). Not
    a pill: M3 moved chips off full-round precisely because a row of pills
    beside a row of pill meters reads as one undifferentiated set of lozenges. */
 .preset {
-  background: var(--panel); border: 1px solid var(--line); color: var(--ink-dim);
+  flex: 0 0 auto; white-space: nowrap; scroll-snap-align: start;
+  background: var(--panel-2); border: 1px solid var(--line); color: var(--ink-dim);
   border-radius: var(--r-sm); padding: 0 12px; height: 28px;
   font-size: var(--t-meta); cursor: pointer;
 }

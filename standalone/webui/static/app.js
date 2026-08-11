@@ -77,30 +77,45 @@ async function loadAgents(keep) {
   }
 }
 
+/* One skeleton per row, filled from M3's list slots: a content slot carrying
+   label + supporting text, and a trailing slot. Every agent renders the same
+   four lines in the same places whether or not it has a profile, a blurb or a
+   download prompt, so the column scans as a list rather than as a stack of
+   cards each arranged to suit its own contents. */
 function renderAgents() {
   const box = $('agents');
   box.textContent = '';
   for (const a of S.agents) {
-    const card = el('button', 'agent' + (a.id === S.agent ? ' on' : ''));
+    const on = a.id === S.agent;
+    const card = el('button', 'agent' + (on ? ' on' : ''));
+    card.type = 'button';
+    card.setAttribute('role', 'radio');
+    card.setAttribute('aria-checked', on ? 'true' : 'false');
     card.onclick = () => selectAgent(a.id);
 
-    const top = el('div', 'agent-top');
-    top.append(el('span', 'agent-size', a.name.replace(/^Agent\s*/, '')),
-               el('span', 'agent-speed', a.speed));
-    card.append(top, el('div', 'agent-model', a.model));
-    if (a.profile) card.append(el('div', 'agent-profile', `⚙ ${a.profile.label}`));
+    const head = el('div', 'agent-head');
+    head.append(el('span', 'agent-name', a.name.replace(/^Agent\s*/, '')),
+                el('span', 'agent-trail', a.speed));
+    card.append(head, el('div', 'agent-support', a.model));
 
-    const stats = el('div', 'agent-stats');
-    stats.append(el('span', null, `${a.runs} run${a.runs === 1 ? '' : 's'}`),
-                 el('span', null, `${a.files} file${a.files === 1 ? '' : 's'}`),
-                 el('span', null, `${a.memories} learned`));
-    card.append(stats, el('div', 'agent-blurb', a.blurb));
+    /* One metadata line, dot-separated. The harness profile used to be a
+       coloured chip of its own, which meant a four-line card carried three
+       unrelated text treatments. It is the same kind of fact as the counts,
+       so it reads in the same voice as them. */
+    const meta = [
+      a.profile ? a.profile.label : null,
+      `${a.runs} run${a.runs === 1 ? '' : 's'}`,
+      `${a.files} file${a.files === 1 ? '' : 's'}`,
+      `${a.memories} learned`,
+    ].filter(Boolean).join(' · ');
+    card.append(el('div', 'agent-meta', meta));
+    card.append(el('div', 'agent-blurb', a.blurb));
 
     if (!a.installed) {
       const row = el('div', 'agent-missing');
       row.append(el('span', null, 'not downloaded'));
       const btn = el('button', 'ghost small', 'Get it');
-      btn.style.padding = '2px 9px';
+      btn.type = 'button';
       btn.onclick = (e) => { e.stopPropagation(); pullModel(a, row); };
       row.append(btn);
       card.append(row);
@@ -169,8 +184,13 @@ function syncModel() {
 function renderPresets(list) {
   const box = $('presets');
   box.textContent = '';
+  /* One row that scrolls sideways, rather than a block that wraps to five.
+     Six wrapped suggestions took more vertical space than the transcript they
+     sit under and read as the main content of the pane. Shorter labels than
+     the wrapped version carried, since a row is scanned, not read. */
   for (const t of list) {
-    const b = el('button', 'preset', clip(t, 58));
+    const b = el('button', 'preset', clip(t, 44));
+    b.type = 'button';
     b.title = t;
     b.onclick = () => { $('task').value = t; $('task').focus(); };
     box.append(b);

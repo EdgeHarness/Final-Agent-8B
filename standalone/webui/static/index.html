@@ -41,9 +41,8 @@
   <!-- ------------------------------------------------------------ models -->
   <aside class="rail">
     <h2 class="rail-title">Models</h2>
-    <p class="rail-hint">Pick one. Each folder is its own agent with its own
-      workspace, memory and history.</p>
-    <div id="agents" class="agents"></div>
+    <p class="rail-hint">Each folder is its own agent, with its own workspace and memory.</p>
+    <div id="agents" class="agents" role="radiogroup" aria-label="Models"></div>
 
     <details class="opts" id="opts">
       <summary>Options</summary>
@@ -70,17 +69,6 @@
 
     <!-- --------------------------------------------------------- the run -->
     <section class="run">
-      <div class="composer">
-        <textarea id="task" rows="2" placeholder="Tell the agent what to do…"></textarea>
-        <div class="composer-actions">
-          <select id="model" class="model-pick"
-                  title="Which installed model actually drives this agent"></select>
-          <button id="run" class="primary" disabled>Run</button>
-          <button id="stop" class="ghost hidden">Stop</button>
-        </div>
-      </div>
-      <div id="presets" class="presets"></div>
-
       <!-- The plan is the only forward-looking information in a run: it
            answers how much longer. Each step lights as its tool fires, so it
            is a progress bar built from state the runner already sends.
@@ -100,8 +88,24 @@
           <div class="empty-art">◆</div>
           <h3>Nothing running</h3>
           <p>Choose a model on the left, pick or type a task, and press Run.
-             Every step — the plan, each token the model writes, every tool call
-             and its result — shows up here as it happens.</p>
+             Every step, the plan, each token the model writes, every tool call
+             and its result, shows up here as it happens.</p>
+        </div>
+      </div>
+
+      <!-- The input docks at the bottom, under the transcript it appends to.
+           It sat above the feed, which meant the newest event was furthest from
+           the thing you type into and the reading order ran backwards. -->
+      <div class="dock">
+        <div id="presets" class="presets" role="group" aria-label="Example tasks"></div>
+        <div class="composer">
+          <textarea id="task" rows="2" placeholder="Tell the agent what to do…"></textarea>
+          <div class="composer-actions">
+            <select id="model" class="model-pick"
+                    title="Which installed model actually drives this agent"></select>
+            <button id="stop" class="ghost hidden">Stop</button>
+            <button id="run" class="primary" disabled>Run</button>
+          </div>
         </div>
       </div>
     </section>
