@@ -1232,6 +1232,8 @@ async function startRun() {
     tiers: $('opt-tiers').checked,
     max_calls: parseInt($('opt-calls').value, 10) || null,
     model: $('model').value || null,
+    mcp: mcpSelected(),
+    mcp_mode: $('opt-mcp-mode').value,
   };
   resetRun();
   let res;
@@ -1408,6 +1410,43 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !optsBox.hidden) { setOpts(false); optsBtn.focus(); }
 });
 
+/* ----------------------------------------------- real accounts (mcp) --- */
+
+/* The registry, fetched once — mcp/servers.json is static for the life of the
+   process. Rows reuse .menu-row so a server reads as one more switch in the
+   menu rather than a form bolted into it. */
+async function loadMcp() {
+  let servers;
+  try {
+    servers = await api('/api/mcp');
+  } catch (err) {
+    return;                       // no registry is not a reason to break the menu
+  }
+  const box = $('opt-mcp');
+  box.textContent = '';
+  for (const s of servers) {
+    // Built as nodes, not markup: the setup text goes into a title attribute and
+    // esc() only covers &<>, so a quote in servers.json would break out of it.
+    const row = el('label', 'menu-row mcp-row');
+    row.title = s.setup;
+    const cb = el('input');
+    cb.type = 'checkbox';
+    cb.className = 'mcp-server';
+    cb.value = s.name;
+    const label = el('span', 'menu-label', s.name);
+    label.append(el('em', null, s.summary));
+    const tick = el('span', 'tick', '✓');
+    tick.setAttribute('aria-hidden', 'true');
+    row.append(cb, label, tick);
+    box.append(row);
+  }
+  paintOptDots();
+}
+
+function mcpSelected() {
+  return [...document.querySelectorAll('.mcp-server:checked')].map((el) => el.value);
+}
+
 /* The popover closes and takes any memory of what is switched on with it, so
    the count stays behind on the bar. */
 const OPT_LABELS = { 'opt-shell': 'shell', 'opt-yolo': 'no confirm',
@@ -1418,6 +1457,14 @@ function paintOptDots() {
   const calls = $('opt-calls').value.trim();
   if (root) on.unshift('folder');
   if (calls) on.push(`${calls} calls`);
+  /* Real accounts lead the summary. Everything else here changes how the agent
+     works; this is the only one that decides whether it can touch live mail. */
+  const conn = mcpSelected();
+  const mode = $('opt-mcp-mode').value;
+  if (conn.length) on.unshift(mode === 'live' ? `${conn.length} live` : `${conn.length} real`);
+  $('conn-state').textContent = conn.length
+    ? `${conn.length} · ${mode === 'read_only' ? 'read only' : mode}` : 'none';
+  $('conn-state').classList.toggle('hot', conn.length > 0 && mode === 'live');
   $('opt-dots').textContent = on.join(' · ');
   /* The two rows that take a value show it on the row, so the menu still reads
      as set or unset once it is closed and reopened. */
@@ -1517,4 +1564,14 @@ paintOptDots();
 growTask();
 
 loadAgents();
+loadMcp();
 setInterval(() => { if (!S.run) loadAgents(true); }, 20000);
+
+/* Registering the worker is what makes the browser offer "Install app". Nothing
+   on the page needs it, so a failure is silent — an old browser, or the
+   pywebview window, still works normally. */
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+}

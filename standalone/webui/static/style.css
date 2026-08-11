@@ -595,6 +595,43 @@ button.menu-row[aria-checked="true"] .tick { opacity: 1; }
   font-size: var(--t-meta); line-height: 1.5; color: var(--ink-faint); margin: 8px 0 0;
 }
 
+/* Real accounts. Each server is a .menu-row so it reads as one more switch,
+   but it carries a second line of description — a name like "ms365-personal"
+   does not say what it reaches or what it needs. Hence the taller row. */
+.mcp-list { display: flex; flex-direction: column; margin: 0 -10px; }
+.mcp-row { height: auto; padding-top: 7px; padding-bottom: 7px; align-items: flex-start; }
+.mcp-row .menu-label { display: flex; flex-direction: column; gap: 2px; }
+.mcp-row .menu-label em {
+  font-style: normal; font-size: var(--t-meta); color: var(--ink-faint);
+  line-height: 1.4;
+}
+.mcp-row .tick { margin-top: 1px; }
+
+.mcp-mode {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; margin-top: 10px; font-size: var(--t-sm); color: var(--ink);
+}
+/* appearance:none — the native control paints its own text colour, which lands
+   near-black on the dark surface and is unreadable. */
+.mcp-mode select {
+  flex: 0 0 auto; width: 152px; font-size: var(--t-meta);
+  color: var(--ink); background: var(--bg);
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  padding: 7px 24px 7px 9px; cursor: pointer;
+  appearance: none; -webkit-appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--ink-faint) 50%),
+                    linear-gradient(135deg, var(--ink-faint) 50%, transparent 50%);
+  background-position: calc(100% - 13px) 51%, calc(100% - 9px) 51%;
+  background-size: 4px 4px, 4px 4px;
+  background-repeat: no-repeat;
+}
+.mcp-mode select:focus { outline: none; border-color: var(--ink-faint); }
+.mcp-mode select option { background: var(--panel); color: var(--ink); }
+
+/* The one row that earns a hue in a monochrome interface: live mode is the
+   setting that lets a local model put a message in front of another person. */
+.menu-val.hot { color: var(--warn); }
+
 /* ---------------------------------------------------------- left: run --- */
 
 .run { display: flex; flex-direction: column; min-width: 0; min-height: 0;

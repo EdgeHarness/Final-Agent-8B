@@ -57,21 +57,6 @@ Opens a local web console — pick the agent, pick an installed model, type a
 task, watch it run, and click the generated `.pptx` / `.xlsx` to view them in
 the browser. Nothing below is required for a demo.
 
-## Without Ollama
-
-On the [[Snapdragon X Elite|Yoga]], `llama-server` replaces Ollama outright —
-Ollama is a wrapper around llama.cpp, so this removes a layer rather than adding
-one. Stop Ollama first; it owns port 11434.
-
-```powershell
-.\serve-xelite.ps1 -Bin ... -Model ...\Meta-Llama-3.1-8B-Instruct-Q4_0.gguf
-python ollama_shim.py                       # :11434 -> :8080
-cd standalone\agents\8b ; python run_agent.py "..."
-```
-
-Build and flag rationale: [[llama.cpp Backend]]. Translation details and the
-[[Ollama Shim#The sharp edge: tiers collapse|--tiers caveat]]: [[Ollama Shim]].
-
 ## Startup banner
 
 A healthy run prints, before any model call:

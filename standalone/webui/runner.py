@@ -36,6 +36,8 @@ sys.path.insert(0, PROJECT)
 from harness import agent as agent_mod  # noqa: E402
 from harness import fs_tools  # noqa: E402
 from harness import llm as llm_mod  # noqa: E402
+from harness import mcp_bridge  # noqa: E402
+from harness import mcp_config  # noqa: E402
 from harness import profiles  # noqa: E402
 from harness import tools as tools_mod  # noqa: E402
 from harness.agent import run_harness  # noqa: E402
@@ -205,6 +207,11 @@ def main():
     p.add_argument("--small", default=None)
     p.add_argument("--deep", default=None)
     p.add_argument("--with-office", action="store_true")
+    p.add_argument("--mcp", default=None,
+                   help="comma-separated MCP servers from mcp/servers.json")
+    p.add_argument("--mcp-mode", default=None,
+                   choices=["draft", "live", "read_only"],
+                   help="draft (default) composes but never transmits")
     p.add_argument("--model", default=None,
                    help="drive this agent folder with a different installed tag "
                         "than its config.json names (demo convenience)")
@@ -227,10 +234,14 @@ def main():
     cfg["num_ctx"] = cfg.get("num_ctx") or profile.num_ctx
 
     root = args.root or cfg.get("root")
+    # ONE Confirmer for both tool sources: it numbers the prompts it sends to the
+    # browser, and two instances would both start at 1, so an answer to a file
+    # prompt could resolve an unrelated mail prompt.
+    confirmer = None if args.yolo else Confirmer()
     if root:
         root = fs_tools.enable(root,
                                allow_shell=args.shell or bool(cfg.get("allow_shell")),
-                               confirm=None if args.yolo else Confirmer())
+                               confirm=confirmer)
         if not args.with_office:
             fs_tools.restrict_to_files()
         agent_mod.EXTRA_RULES = REAL_RULES.format(root=root)
@@ -238,14 +249,31 @@ def main():
         today = datetime.date.today()
         agent_mod.SIM_TODAY = today
         agent_mod.SIM_TODAY_HUMAN = today.strftime("%A, %B %d, %Y")
-    # Real-folder work costs more calls than the simulated office: the agent has
-    # to look before it writes, and a listing or a read is a whole call. It was a
-    # flat 40 for every model, which is two and a half times the 1B's own tuned
-    # budget and nearly twice the 32B's - the number was picked for the 8B and
-    # then applied to everything. Doubling the profile's budget keeps the shipped
-    # 8B agent at exactly 40 and lets the rest scale with the model.
+
+    mcp_cfg = cfg.get("mcp") or {}
+    names = ([s.strip() for s in args.mcp.split(",") if s.strip()] if args.mcp
+             else mcp_cfg.get("enable") or [])
+    mcp_mode = args.mcp_mode or mcp_cfg.get("mode") or "draft"
+    mcp_summary = None
+    if names:
+        servers = mcp_config.names_to_servers(names, mcp_cfg, mode=mcp_mode)
+        mcp_summary = mcp_bridge.enable(servers, confirm=confirmer, mode=mcp_mode)
+        mcp_bridge.restrict_to_mcp(keep_office_docs=not root,
+                                   keep_extra=fs_tools.injected() if root else ())
+        agent_mod.EXTRA_RULES += mcp_bridge.mail_rules(mcp_mode)
+        agent_mod.EXTRA_WRITE_TOOLS = (set(agent_mod.EXTRA_WRITE_TOOLS)
+                                       | mcp_bridge.WRITE_TOOLS)
+        today = datetime.date.today()
+        agent_mod.SIM_TODAY = today
+        agent_mod.SIM_TODAY_HUMAN = today.strftime("%A, %B %d, %Y")
+    # Real-folder and real-account work both cost more calls than the simulated
+    # office: the agent has to look before it writes, and every listing or read
+    # is a whole call. This was a flat 40 for every model - a number picked for
+    # the 8B and applied to a 1B and a 32B alike. Doubling the profile's budget
+    # keeps the shipped 8B at exactly 40 and lets the rest scale with the model.
     agent_mod.MAX_CALLS = (args.max_calls or cfg.get("max_calls")
-                           or (profile.max_calls * 2 if root else profile.max_calls))
+                           or (profile.max_calls * 2 if (root or names)
+                               else profile.max_calls))
 
     world = World(os.path.join(folder, "workspace"), persistent=True)
     mem = MemoryStore(os.path.join(folder, "memory", "memory.jsonl"))
@@ -267,10 +295,15 @@ def main():
     emit("banner", agent=args.agent, name=cfg["name"], model=cfg["model"],
          note=cfg.get("note", ""), budget=agent_mod.MAX_CALLS, task=args.task,
          endpoint=OLLAMA_URL, root=root, shell=bool(args.shell), yolo=bool(args.yolo),
-         toolset=("files only" if root and not args.with_office
+         toolset=("real accounts" if names and not root
+                  else "files + real accounts" if names and root
+                  else "files only" if root and not args.with_office
                   else "files + office world" if root else "office world"),
          tiers=tiers, today=agent_mod.SIM_TODAY_HUMAN,
-         tools=sorted(tools_mod.TOOLS), profile=profile.to_dict())
+         tools=sorted(tools_mod.TOOLS), profile=profile.to_dict(),
+         mcp=({"mode": mcp_mode, "servers": mcp_summary,
+               "warnings": mcp_config.count_warnings(mcp_summary)}
+              if mcp_summary else None))
     emit("world", **world_snapshot(world, mem, root))
 
     # ---- hooks: narrate the run without changing it ----
@@ -311,6 +344,7 @@ def main():
     with open(log_path, "w", encoding="utf-8") as f:
         json.dump({"task": args.task, "root": root, "agent": args.agent,
                    "model": cfg["model"], "via": "webui",
+                   "mcp": {"servers": names, "mode": mcp_mode} if names else None,
                    "transcript": ep.transcript, "finished": ep.finished,
                    "summary": ep.done_summary}, f, indent=1, ensure_ascii=False)
 

@@ -12,6 +12,17 @@
      not take an SVG here, and browsers that do take one never fetch it. -->
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <link rel="alternate icon" href="/static/favicon.png" type="image/png">
+
+<!-- Installable as a desktop app: own window, dock icon, no URL bar. The icons
+     here are cut from the same mark.png the favicon masks, but on their own dark
+     tile — a dock and a taskbar supply no ground of their own, so unlike the
+     favicon these cannot be transparent. -->
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#f7f7f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d0d0d" media="(prefers-color-scheme: dark)">
+<link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Agent Lab">
 </head>
 <body>
 
@@ -250,6 +261,32 @@
               </summary>
               <div class="menu-body">
                 <input type="number" id="opt-calls" min="2" max="80" placeholder="auto">
+              </div>
+            </details>
+
+            <!-- Real mail and calendars, off unless something here is ticked.
+                 It sits with the other value rows because it is the same kind
+                 of decision, but it is the only one that can reach outside the
+                 machine, so the row states that when the menu is shut. -->
+            <details class="menu-sub">
+              <summary class="menu-row">
+                <span class="menu-label">Real accounts</span>
+                <span class="menu-val" id="conn-state">none</span>
+                <span class="chev" aria-hidden="true">›</span>
+              </summary>
+              <div class="menu-body">
+                <div id="opt-mcp" class="mcp-list"></div>
+                <label class="mcp-mode">
+                  <span>Mode</span>
+                  <select id="opt-mcp-mode">
+                    <option value="draft">draft · never sends</option>
+                    <option value="live">live · can send</option>
+                    <option value="read_only">read only</option>
+                  </select>
+                </label>
+                <p class="opt-note">Inference stays on this machine either way.
+                  These tools do not: they reach Google and Microsoft. Draft mode
+                  hides every tool that could transmit to a person.</p>
               </div>
             </details>
           </div>

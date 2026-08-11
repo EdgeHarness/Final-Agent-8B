@@ -34,6 +34,7 @@ OLLAMA_URL = "http://127.0.0.1:11434"
 DEFAULT_PORT = 8765
 
 sys.path.insert(0, PROJECT)
+from harness import mcp_config  # noqa: E402
 from harness import profiles  # noqa: E402
 
 # Rough per-size guidance for the picker; the machine, not the harness, decides.
@@ -559,6 +560,10 @@ class Runs:
                 cmd += ["--max-calls", str(int(options["max_calls"]))]
             if options.get("model"):
                 cmd += ["--model", options["model"]]
+            if options.get("mcp"):
+                cmd += ["--mcp", options["mcp"]]
+            if options.get("mcp_mode"):
+                cmd += ["--mcp-mode", options["mcp_mode"]]
             env = dict(os.environ, PYTHONUNBUFFERED="1", PYTHONIOENCODING="utf-8")
             proc = subprocess.Popen(cmd, cwd=PROJECT, env=env, text=True,
                                     encoding="utf-8", errors="replace", bufsize=1,
@@ -643,6 +648,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self.static_file("index.html")
             if path.startswith("/static/"):
                 return self.static_file(path[len("/static/"):])
+            # Both must be served from the root, not /static/: a service worker
+            # can only control a scope at or below its own path, and the install
+            # prompt needs the manifest's scope to cover start_url.
+            if path == "/sw.js":
+                return self.static_file("sw.js")
+            if path == "/manifest.webmanifest":
+                return self.static_file("manifest.webmanifest")
             if path == "/api/agents":
                 return self.send_json(agent_list())
             if path == "/api/workspace":
@@ -662,6 +674,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 name = os.path.basename(q.get("name", ""))
                 with open(os.path.join(folder, "logs", name), encoding="utf-8") as f:
                     return self.send_json(json.load(f))
+            if path == "/api/mcp":
+                # The registry, for the run panel's account picker. Setup notes
+                # come along so the UI can say what a server needs before it works.
+                return self.send_json([
+                    {"name": name, "summary": summary,
+                     "setup": mcp_config.setup_notes(name)}
+                    for name, summary in mcp_config.available()])
             if path == "/api/status":
                 run = RUNS.current
                 return self.send_json({"run": run.id if run else None,
@@ -696,7 +715,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                            "with_office": body.get("with_office"),
                            "tiers": body.get("tiers"), "small": body.get("small"),
                            "deep": body.get("deep"), "max_calls": body.get("max_calls"),
-                           "model": (body.get("model") or "").strip() or None}
+                           "model": (body.get("model") or "").strip() or None,
+                           "mcp": ",".join(body.get("mcp") or []) or None,
+                           "mcp_mode": body.get("mcp_mode") or None}
                 run = RUNS.start(agent, task, options)
                 return self.send_json({"run": run.id, "agent": agent})
             if path == "/api/stop":

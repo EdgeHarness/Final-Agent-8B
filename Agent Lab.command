@@ -15,13 +15,20 @@ if ! "$PY" -c "import requests, pptx, openpyxl" >/dev/null 2>&1; then
     read -r; exit 1; }
 fi
 
-# The lab talks to a local Ollama by default. For the llama.cpp path instead,
-# see standalone/llamacpp/README.md — start llama-server + ollama_shim.py and
-# leave Ollama stopped.
+# Optional: gives Agent Lab its own window instead of a browser tab. Not fatal
+# if it fails — webui.app falls back to the browser.
+if ! "$PY" -c "import webview" >/dev/null 2>&1; then
+  echo "Installing pywebview for the app window (one time, optional)..."
+  "$PY" -m pip install --quiet pywebview >/dev/null 2>&1 || true
+fi
+
+# The lab talks to a local Ollama on 11434.
 if ! curl -s -m 2 http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
   echo "Starting Ollama..."
   (ollama serve >/dev/null 2>&1 &) 2>/dev/null
   sleep 2
 fi
 
-exec "$PY" -m webui.server
+# webui.app opens a native window when pywebview is installed, and falls back to
+# the browser when it is not. Either way the server is the same loopback server.
+exec "$PY" -m webui.app

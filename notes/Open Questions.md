@@ -78,10 +78,10 @@ is not serving.
 
 ## Which Snapdragon is it, actually
 
-[[Snapdragon X Elite]] targets X1E (12 cores, 135 GB/s). The current Yoga Slim
-7x ships the **X2 Elite** (18 cores, ~228 GB/s). Build flags survive either way;
-every thread count and roofline figure does not. Unconfirmed, and it gates the
-tuning work.
+Earlier tuning assumed X1E (12 cores, 135 GB/s). The current Yoga Slim 7x ships
+the **X2 Elite** (18 cores, ~228 GB/s). Build flags survive either way; every
+thread count and roofline figure does not. Unconfirmed, and it gates the tuning
+work.
 
 ## Global harness configuration
 

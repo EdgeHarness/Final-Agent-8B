@@ -295,13 +295,18 @@ _KEEP_ALWAYS = {"think", "save_memory", "recall_memories", "done",
                 "create_presentation", "create_spreadsheet", "read_spreadsheet"}
 
 
-def restrict_to_mcp(keep_office_docs=True):
+def restrict_to_mcp(keep_office_docs=True, keep_extra=()):
     """Drop the simulated-office tools (fake inbox/calendar/messages) so a
     real-account agent isn't confused by having both list_emails and a real
     Gmail list tool. Keeps think/memory/done, the injected MCP tools, and
-    optionally the real .pptx/.xlsx writers. Process-local; bench/ is unaffected."""
-    keep = set(_INJECTED) | ({"think", "save_memory", "recall_memories", "done"}
-                             if not keep_office_docs else _KEEP_ALWAYS)
+    optionally the real .pptx/.xlsx writers. Process-local; bench/ is unaffected.
+
+    keep_extra spares tools another module injected — pass fs_tools.injected()
+    when --root and --mcp are both on, or the real file tools get dropped here
+    along with the simulated ones."""
+    keep = set(_INJECTED) | set(keep_extra) | (
+        {"think", "save_memory", "recall_memories", "done"}
+        if not keep_office_docs else _KEEP_ALWAYS)
     for name in list(TOOLS):
         if name not in keep:
             TOOLS.pop(name, None)
