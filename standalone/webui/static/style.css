@@ -215,6 +215,24 @@ button, input, textarea, select { font-family: inherit; color: inherit; }
 
 /* Separated from the readouts by a rule, not just a gap: it is a control among
    numbers and the eye should not have to work that out. */
+/* Sits with the meters but is a control, so it takes the same pill shape as
+   the other controls rather than inventing a third kind of button. */
+.ws-btn {
+  display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px;
+  border-radius: var(--r-full); cursor: pointer; font-size: var(--t-sm);
+  border: 1px solid var(--line); background: transparent; color: var(--ink-dim);
+  transition: background-color .12s ease, color .12s ease;
+}
+.ws-btn:hover { color: var(--ink); background-color: color-mix(in srgb, currentColor 8%, transparent); }
+.ws-btn[aria-pressed="true"] {
+  color: var(--on-accent); background: var(--accent); border-color: transparent;
+}
+.ws-count {
+  font-size: var(--t-meta); font-variant-numeric: tabular-nums;
+  background: var(--good); color: var(--on-accent);
+  border-radius: var(--r-full); padding: 0 6px; min-width: 17px; text-align: center;
+}
+
 .theme {
   width: 32px; height: 32px; border-radius: var(--r-sm); cursor: pointer;
   border: 1px solid transparent; background: transparent; color: var(--ink-faint);
@@ -228,13 +246,43 @@ button, input, textarea, select { font-family: inherit; color: inherit; }
 
 /* ------------------------------------------------------------- layout --- */
 
+/* Three states, all driven off classes on <body>, so nothing has to compute a
+   layout in JS. Closed by default on both sides: the conversation is the
+   product, and a rail of models plus a pane of files you have not made yet is
+   two columns of furniture around it. */
 .layout {
   flex: 1 1 auto; min-height: 0;
   display: grid;
-  grid-template-columns: 264px minmax(0, 1fr);
+  grid-template-columns: 0 minmax(0, 1fr);
+  transition: grid-template-columns .18s ease;
 }
-.rail { background: var(--panel); overflow-y: auto; min-height: 0;
-  border-right: 1px solid var(--line); padding: 16px 14px 28px; }
+body.rail-open .layout { grid-template-columns: 288px minmax(0, 1fr); }
+.rail {
+  background: var(--panel); overflow-y: auto; overflow-x: hidden;
+  /* a grid item defaults to min-width:auto, so the padding held the column
+     open at 29px even with the track set to 0 */
+  min-height: 0; min-width: 0;
+  border-right: 1px solid var(--line); padding: 16px 14px 28px;
+}
+body:not(.rail-open) .rail { padding-inline: 0; border-right: 0; }
+/* The column is 0 wide when closed, so its contents would still be reachable
+   by Tab and read by a screen reader from inside a strip nobody can see. */
+body:not(.rail-open) .rail { visibility: hidden; }
+@media (prefers-reduced-motion: reduce) {
+  .layout, .body { transition: none; }
+}
+
+.rail-close {
+  margin-left: auto; background: transparent; border: 0; cursor: pointer;
+  color: var(--ink-faint); font-size: var(--t-sm); line-height: 1;
+  padding: 4px 6px; border-radius: var(--r-sm);
+}
+.rail-close:hover { color: var(--ink); background: var(--accent-soft); }
+.rail-more { margin-top: 22px; border-top: 1px solid var(--line); padding-top: 14px; }
+.rail-sub {
+  font-size: var(--t-meta); text-transform: uppercase; letter-spacing: .09em;
+  color: var(--ink-faint); font-weight: 500; margin-bottom: 10px;
+}
 
 /* The split is a live ratio, not a fixed width: --run-pct is written by the
    splitter drag. Default 50/50, chosen by looking at it rather than by
@@ -247,9 +295,32 @@ button, input, textarea, select { font-family: inherit; color: inherit; }
    allowed to shrink. */
 .body {
   display: grid; min-height: 0; min-width: 0;
-  grid-template-columns: clamp(24%, var(--run-pct, 50%), 68%) 6px 1fr;
+  grid-template-columns: minmax(0, 1fr) 0 0;
   grid-template-rows: minmax(0, 1fr);
+  transition: grid-template-columns .2s ease;
 }
+body.ws-open .body {
+  grid-template-columns: clamp(24%, var(--run-pct, 50%), 68%) 6px 1fr;
+}
+/* visibility alone leaves the contents laid out: the tab row has a min-content
+   width, so a zero-width column still pushed 130px past the viewport and gave
+   the whole page a horizontal scrollbar. Clip it as well. */
+body:not(.ws-open) .artifacts { visibility: hidden; overflow: hidden; }
+/* display, not visibility: the splitter widens its hit area with an ::after at
+   inset 0 -5px, which still reached 5px past a zero-width column and gave the
+   page a scrollbar. */
+body:not(.ws-open) .splitter { display: none; }
+
+/* With the workspace closed the run has the whole width, and a transcript
+   measured across 1400px is unreadable. The column holds a reading measure and
+   centres, which is what every thread interface does with the same problem.
+   Removed the moment the split returns, because there the pane width is
+   already the measure. */
+body:not(.ws-open) .feed-in,
+body:not(.ws-open) .runbar,
+body:not(.ws-open) .presets,
+body:not(.ws-open) .composer { max-width: 760px; margin-inline: auto; }
+body:not(.ws-open) .empty { max-width: 640px; margin-inline: auto; }
 
 /* 6px column, but a wider invisible hit area, because a 6px mouse target is a
    frustration and the pointer does not care where the pixels are painted. */
@@ -351,6 +422,12 @@ body.resizing { user-select: none; cursor: col-resize; }
 }
 .rail-search input:focus { outline: none; border-color: var(--ink-faint); }
 .rail-none { font-size: var(--t-sm); color: var(--ink-faint); margin: 10px 2px; }
+/* Not selectable, so it does not take the hover or the pointer of a row you
+   can actually choose. Its description always shows: there is no selected
+   state to reveal it, and the description is the reason to want it. */
+.agent.avail { cursor: default; }
+.agent.avail:hover { background-color: transparent; }
+.agent.avail .agent-desc { display: block; }
 .pull-bar { height: 3px; border-radius: var(--r-xs); background: var(--line); overflow: hidden; margin-top: 6px; }
 .pull-bar i {
   display: block; height: 100%; width: 100%; background: var(--warn);
@@ -378,6 +455,11 @@ body.resizing { user-select: none; cursor: col-resize; }
 @keyframes pop-in { from { opacity: 0; transform: translateY(5px); } }
 @media (prefers-reduced-motion: reduce) { .opts { animation: none; } }
 .opts[hidden] { display: none; }
+.opt-group {
+  font-size: var(--t-meta); text-transform: uppercase; letter-spacing: .08em;
+  color: var(--ink-faint); font-weight: 500; margin: 0 0 8px;
+}
+.opt-group ~ .opt-group { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line-soft); }
 .opt { display: block; margin-top: 12px; font-size: var(--t-sm); color: var(--ink-dim); }
 .opt span { display: block; margin-bottom: 5px; }
 .opt em { color: var(--ink-faint); font-style: normal; font-size: var(--t-meta); }
@@ -408,27 +490,36 @@ body.resizing { user-select: none; cursor: col-resize; }
    behind it moves. --dock-h is written by a ResizeObserver so the feed's
    bottom padding always clears the field, however tall it has grown. */
 .run { position: relative; }
+/* The dock carries no surface of its own: a panel-coloured band behind the
+   field read as a separate deck bolted to the bottom of the page. It is a
+   fade to the page colour instead, so the transcript dissolves into the
+   background and the only object down here is the field itself. */
 .dock {
   position: absolute; left: 0; right: 0; bottom: 0; z-index: 2;
-  background: color-mix(in srgb, var(--panel) 72%, transparent);
-  backdrop-filter: blur(22px) saturate(1.5);
-  -webkit-backdrop-filter: blur(22px) saturate(1.5);
-  border-top: 1px solid var(--glass-line);
+  background: linear-gradient(to bottom, transparent, var(--bg) 42%);
+  pointer-events: none;
 }
-/* No backdrop-filter means no glass, and a 72% panel over live text is
-   unreadable, so those browsers get the solid panel instead. */
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .dock { background: var(--panel); }
-}
+.dock > * { pointer-events: auto; }
 
 /* The field is the box. The textarea inside it is chromeless, so focus lands
    on the container and the whole thing reads as one control. */
+/* The field is the one thing down here that floats, so the glass belongs on
+   it: the transcript blurs behind the field as it scrolls under, rather than
+   behind a full-width bar. */
 .composer {
+  position: relative;
   margin: 10px 20px 16px; padding: 10px 10px 10px 14px;
-  background: var(--panel-2); border: 1px solid var(--line);
+  background: var(--glass); border: 1px solid var(--glass-line);
+  backdrop-filter: blur(24px) saturate(1.6);
+  -webkit-backdrop-filter: blur(24px) saturate(1.6);
   border-radius: var(--r-xl); transition: border-color .12s ease;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, .22);
 }
 .composer:focus-within { border-color: var(--ink-faint); }
+/* Without backdrop-filter a translucent field over live text is unreadable. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .composer { background: var(--panel-2); border-color: var(--line); }
+}
 .composer textarea {
   display: block; width: 100%; resize: none; background: transparent; border: 0;
   padding: 4px 0 8px; font-size: var(--t-base); line-height: var(--lh-read);
@@ -522,7 +613,9 @@ button.ghost:hover, a.ghost:hover { color: var(--ink); }
 
 /* The plan and its one control share a baseline row, so a long plan wraps
    without ever running under the button. */
-.runbar { display: flex; align-items: flex-start; gap: 12px; padding: 2px 20px 8px; }
+.runbar { padding: 2px 20px 8px; }
+/* the row is only worth its space once the plan has steps in it */
+.runbar:not(:has(.plan .step)) { display: none; }
 
 /* The harness emits a plan and the UI used to throw it away. It is the only
    forward-looking information in the whole run, and it answers the one
@@ -547,18 +640,11 @@ button.ghost:hover, a.ghost:hover { color: var(--ink); }
 
 /* Two ways to read a run. Default shows the reasoning, which is what proves
    the model is thinking. "Steps only" strips it to the tool calls, which is
-   what proves it acted — what you want when scrubbing a long run.
-   Sentence case, not micro-caps: uppercase tracking on a two-word control is
-   costume, and makes an ordinary toggle look like a system label. */
-.steps-toggle {
-  flex: 0 0 auto; font-size: var(--t-sm); height: 28px; padding: 0 12px;
-  border-radius: var(--r-sm); cursor: pointer;
-  border: 1px solid var(--line); background: var(--panel); color: var(--ink-faint);
-}
-.steps-toggle:hover { color: var(--ink-dim); border-color: var(--ink-faint); }
-.steps-toggle[aria-pressed="true"] {
-  color: var(--accent); border-color: var(--accent); background: var(--accent-soft);
-}
+   what proves it acted. It lives in the options popover: it is a view
+   preference, and as a lone button on the plan row it sat marooned in the
+   middle of an empty strip before any plan arrived.
+   Hide the events that carry no tool call, and inside the ones that do, hide
+   everything except the call itself and why it failed. */
 /* Hide the events that carry no tool call, and inside the ones that do, hide
    everything except the call itself and why it failed. */
 .steps-only .ev:not(.has-tool) { display: none; }
@@ -1049,16 +1135,21 @@ table.grid td.formula::after { content: ' ƒ'; font-size: 9px; color: var(--ink-
 
 /* ref 3: the rail collapses around 1200px. Below that the canvas would be
    narrower than the run, which inverts the premise of the split. */
-@media (max-width: 1200px) {
-  .layout { grid-template-columns: 232px minmax(0, 1fr); }
-  .body { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 45vh) 1fr; }
-  .run { border-right: none; border-bottom: 1px solid var(--line); }
-  /* stacked, there is no horizontal split left to drag */
+/* Narrow, the workspace becomes an overlay rather than stacking under the run.
+   Stacking moved the conversation up the page as files arrived, so the thing
+   you type into kept shifting: the reason this layout changed at all. The chat
+   holds its position at every width now, and the workspace covers it. */
+@media (max-width: 1100px) {
+  body.rail-open .layout { grid-template-columns: 248px minmax(0, 1fr); }
+  body.ws-open .body { grid-template-columns: minmax(0, 1fr) 0 0; }
   .splitter { display: none; }
+  body.ws-open .artifacts {
+    position: absolute; inset: 0; z-index: 6;
+    border-left: 1px solid var(--line);
+  }
+  .body { position: relative; }
 }
-@media (max-width: 980px) {
-  body { height: auto; overflow: auto; }
-  .layout { grid-template-columns: 1fr; }
-  .rail { border-right: 0; border-bottom: 1px solid var(--line); }
-  .body { grid-template-rows: minmax(60vh, auto) auto; }
+@media (max-width: 720px) {
+  body.rail-open .layout { grid-template-columns: 100% 0; }
+  body.rail-open .rail { border-right: 0; }
 }

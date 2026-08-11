@@ -155,7 +155,14 @@ def agent_list():
             "memories": sum(1 for _ in open(mem_path, encoding="utf-8"))
                         if os.path.isfile(mem_path) else 0,
         })
+    # Models the catalog knows about that are not installed. The rail offers
+    # them for download, so a machine with one model is not a dead end.
+    have = {a["model"] for a in out}
+    available = [dict(v, tag=k) for k, v in CATALOG.items()
+                 if k not in have and not tag_installed(k, tags)]
+    available.sort(key=lambda m: m["tag"])
     return {"agents": out, "ollama": tags is not None, "presets": PRESET_TASKS,
+            "available": available,
             "project": PROJECT, "installed_models": sorted(tags or {})}
 
 

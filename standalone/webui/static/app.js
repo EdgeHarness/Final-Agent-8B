@@ -65,6 +65,7 @@ const S = {
 async function loadAgents(keep) {
   const data = await api('/api/agents');
   S.agents = data.agents;
+  S.available = data.available || [];
   // whether a model can be pulled in place, or only by a command you run
   S.ollama = !!data.ollama;
   $('meter-ollama').className = 'meter dotmeter ' + (data.ollama ? 'up' : 'down');
@@ -177,6 +178,29 @@ function renderAgents() {
      enough that finding a model is actually work. */
   $('rail-search').classList.toggle('hidden', S.agents.length < 6);
   $('agent-count').textContent = S.agents.length > 1 ? String(S.agents.length) : '';
+  renderAvailable(q);
+}
+
+/* Models the catalog knows about that are not installed. Same row shape as an
+   agent, minus the counts it cannot have yet, so the column reads as one list
+   of models rather than two unrelated ones. */
+function renderAvailable(q) {
+  const box = $('available');
+  box.textContent = '';
+  const shown = (S.available || []).filter((m) => !q ||
+    [m.tag, m.title, m.vendor].some((f) => String(f || '').toLowerCase().includes(q)));
+  for (const m of shown) {
+    const row = el('div', 'agent avail');
+    const head = el('div', 'agent-head');
+    head.append(el('span', 'agent-name', m.tag),
+                el('span', 'agent-trail', m.context ? `${Math.round(m.context / 1024)}k` : ''));
+    row.append(head);
+    row.append(el('div', 'agent-support', [m.vendor, m.title].filter(Boolean).join(' ')));
+    row.append(el('div', 'agent-desc avail-desc', m.description || ''));
+    row.append(downloadRow({ model: m.tag }, m));
+    box.append(row);
+  }
+  $('rail-more').classList.toggle('hidden', !shown.length);
 }
 
 function pullModel(a, row) {
@@ -216,11 +240,19 @@ async function selectAgent(id) {
 // decides which installed tag does the talking. Defaults to the model
 // config.json names, and falls back to whatever IS installed so a fresh
 // machine can demo without a 4.7 GB download first.
+const MORE = '__more__';
+
 function renderModels(list) {
   const sel = $('model');
   sel.textContent = '';
   for (const m of list || []) sel.append(new Option(m, m));
   if (!sel.options.length) sel.append(new Option('no models installed', ''));
+  /* The picker is where you go when you want a different model, so it is also
+     where "I want one I do not have" belongs. Choosing it opens the rail
+     rather than changing the model. */
+  const more = new Option('More models…', MORE);
+  more.className = 'opt-more';
+  sel.append(more);
   syncModel();
 }
 
@@ -228,7 +260,7 @@ function syncModel() {
   const sel = $('model');
   const a = S.agents.find((x) => x.id === S.agent);
   if (!a || !sel.options.length) return;
-  const exact = [...sel.options].find((o) => o.value === a.model);
+  const exact = [...sel.options].find((o) => o.value === a.model && o.value !== MORE);
   sel.value = exact ? a.model : sel.options[0].value;
   sel.classList.toggle('substituted', !exact);
   sel.title = exact
@@ -603,6 +635,8 @@ async function showArtifact(name, stat) {
 
   $('holding').classList.add('hidden');
   $('grid-all').classList.remove('hidden');
+  // the first file is the moment the workspace becomes worth looking at
+  setWorkspace(true);
 
   const pane = el('div', 'pane');
   // the static panes are marked up as tabpanels; panes built at runtime were
@@ -630,7 +664,12 @@ async function showArtifact(name, stat) {
   $('grid-all').append(thumb);
 
   panes[name] = { pane, tab, stat: capStat };
-  allCount.textContent = String(Object.keys(panes).length - 2);
+  const made = Object.keys(panes).length - 2;
+  allCount.textContent = String(made);
+  if (!document.body.classList.contains('ws-open')) {
+    $('ws-count').textContent = String(made);
+    $('ws-count').classList.remove('hidden');
+  }
   select(name);
   setTimeout(() => tab.classList.remove('new'), 950);
 }
@@ -1124,6 +1163,7 @@ function resetRun() {
   $('grid-all').classList.add('hidden');
   $('holding').classList.remove('hidden');
   allCount.textContent = '0';
+  $('ws-count').classList.add('hidden');
   select('all');
 
   for (const k of Object.keys(touched)) delete touched[k];
@@ -1320,12 +1360,31 @@ function growTask() {
 }
 taskBox.addEventListener('input', growTask);
 
+/* --- the two side panels ------------------------------------------------- */
+/* Both closed by default. The conversation is the product; a rail of models
+   and a pane of files you have not made yet are furniture around it. */
+function setWorkspace(open) {
+  document.body.classList.toggle('ws-open', open);
+  $('ws-btn').setAttribute('aria-pressed', open ? 'true' : 'false');
+  if (open) $('ws-count').classList.add('hidden');
+}
+function setRail(open) {
+  document.body.classList.toggle('rail-open', open);
+  if (open) $('agent-filter').focus();
+}
+$('ws-btn').onclick = () => setWorkspace(!document.body.classList.contains('ws-open'));
+$('rail-close').onclick = () => setRail(false);
+$('model').addEventListener('change', (e) => {
+  if (e.target.value !== MORE) return;
+  setRail(true);
+  syncModel();          // put the picker back on the model actually in use
+});
+
 /* Steps only. Pure presentation: nothing is dropped from the DOM, so toggling
    back mid-run loses nothing and the filter costs one class on <body>. */
 const stepsToggle = $('steps-toggle');
-stepsToggle.onclick = () => {
-  const on = document.body.classList.toggle('steps-only');
-  stepsToggle.setAttribute('aria-pressed', on ? 'true' : 'false');
+stepsToggle.onchange = () => {
+  document.body.classList.toggle('steps-only', stepsToggle.checked);
   autoscroll();
 };
 
