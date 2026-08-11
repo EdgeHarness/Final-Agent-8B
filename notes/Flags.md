@@ -16,7 +16,7 @@ Everything not recognised as a flag is joined with spaces and becomes the task.
 | `--small TAG` | cheaper model for routing/verify (implies `--tiers`) |
 | `--deep TAG` | on-demand heavy tier (implies `--tiers`) |
 | `--with-office` | keep the simulated office tools alongside the file tools |
-| `--max-calls N` | LLM call budget (default: the model's profile — **20** at 8B — or 40 with `--root`) |
+| `--max-calls N` | LLM call budget (default: the model's profile — **50** at 8B — lifted to at least 40 with `--root`) |
 
 ## Notes
 

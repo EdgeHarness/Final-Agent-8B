@@ -1361,6 +1361,7 @@ function setStats(on) {
 }
 setStats(stored('agentlab-stats') !== 'off');
 $('opt-stats').onchange = (e) => setStats(e.target.checked);
+
 document.addEventListener('click', () => { if (!prefsBox.hidden) setPrefs(false); });
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !prefsBox.hidden) { setPrefs(false); prefsBtn.focus(); }
@@ -1573,6 +1574,8 @@ const OPT_LABELS = { 'opt-shell': 'shell', 'opt-yolo': 'no confirm',
 function paintOptDots() {
   const on = Object.keys(OPT_LABELS).filter((id) => $(id).checked).map((id) => OPT_LABELS[id]);
   const root = $('opt-root').value.trim();
+  /* The limit lives in preferences now, but it still changes how a run behaves,
+     so it stays visible on the bar next to the run options. */
   const calls = $('opt-calls').value.trim();
   if (root) on.unshift('folder');
   if (calls) on.push(`${calls} calls`);
@@ -1588,10 +1591,30 @@ function paintOptDots() {
   /* The two rows that take a value show it on the row, so the menu still reads
      as set or unset once it is closed and reopened. */
   $('root-val').textContent = root ? root.replace(/^.*\//, '') || root : 'simulated';
-  $('calls-set').textContent = calls || 'auto';
 }
 optsBox.addEventListener('input', paintOptDots);
 optsBox.addEventListener('change', paintOptDots);
+
+/* The call limit persists like the other preferences: it is a standing choice
+   about how long this machine is willing to let a run go, not a per-task one.
+   It lives down here rather than with the rest of the preferences because it
+   paints the options summary, and that reads OPT_LABELS above.
+
+   Blank is a real value and means "the model's own default", so it stores as a
+   removal rather than an empty string. The clamp here is a courtesy to the
+   person typing; runner.call_budget is what actually holds the line, since the
+   HTTP API takes a number from anywhere, not just from this input. */
+function setCalls(raw) {
+  const n = parseInt(raw, 10);
+  // An out-of-range number is clamped and shown, not cleared: typing 5000 and
+  // watching the field empty itself reads as a bug rather than as a limit.
+  const v = Number.isFinite(n) ? String(Math.min(200, Math.max(2, n))) : '';
+  $('opt-calls').value = v;
+  store('agentlab-calls', v || null);
+  paintOptDots();
+}
+setCalls(stored('agentlab-calls'));
+$('opt-calls').onchange = (e) => setCalls(e.target.value);
 
 /* The field grows with the text instead of scrolling inside two fixed rows. */
 const taskBox = $('task');

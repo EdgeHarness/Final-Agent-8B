@@ -55,7 +55,7 @@ Two things that surprise people:
 
 An 8B at `num_ctx` 8192 holds every tool spec in its system prompt. The Microsoft
 server ships **300+ tools**. Injecting them doesn't error — it quietly spends the
-[[Harness Profiles|20-call budget]] choosing between near-identical options. The
+[[Harness Profiles|call budget]] choosing between near-identical options. The
 registry pins `--preset mail,calendar`, and `mcp_config.count_warnings()` warns
 past 25 tools. This is the same reason [[Real-Computer Mode]] drops the simulated
 office tools: two plausible tools for one job is how a small model gets lost.

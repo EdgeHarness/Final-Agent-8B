@@ -29,8 +29,15 @@ the agents already use — nothing leaves the machine.
   run/file/memory counts. A model that isn't downloaded yet has a **Get it**
   button that pulls it (with a progress bar) right there. Below is an
   **Options** drawer for the same switches the command-line runner has: a real
-  working folder (`--root`), shell, skip-confirmations, keep-office-tools, the
-  tiered router, and a custom call budget.
+  working folder (`--root`), shell, skip-confirmations, keep-office-tools and
+  the tiered router.
+- **Top right — preferences.** Theme, glass panels, run details, and the **tool
+  call limit**. The limit is here rather than in Options because it is a
+  standing choice about how long this machine will let a run go, not a decision
+  about one task; it persists across sessions, and blank means the model's own
+  profile default (50 at 8B). Whatever is sent is clamped to 2–200 in
+  `runner.call_budget`, since the HTTP API takes a number from anywhere, not
+  just from that input.
 - **Middle — the run.** A card per step. Model output streams in with a
   blinking cursor; the model's `thought` is pulled out and shown plainly, the
   raw JSON tucked behind a disclosure. Tool calls show their arguments and

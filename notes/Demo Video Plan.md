@@ -4,7 +4,7 @@ Working plan for the Agent Lab demo. Division of labour: I produce the screen
 recording, you record the voiceover from the transcript below, ChatCut matches
 the cut to your read.
 
-Target length **75 seconds**. Timings use **145 words per minute**, which is
+Target length **85 seconds** (take 6; take 5 as shot is 68). Timings use **145 words per minute**, which is
 normal product-demo narration pace: conversational speech is 150 to 160, and
 demo reads land slower because the viewer is also reading the screen. That is
 **2.4 words per second**. Every section below gives a word budget, not just a
@@ -128,7 +128,8 @@ Other pre-flight:
 - Reset the agent first so the file list is empty and the timeline is the
   welcome screen. The reset control is the circular arrow in the workspace
   header, or `POST /api/reset`.
-- Seed Dana's email (script in section 5).
+- Seed Dana's email and the attachment (section 5). Seed **after** the reset,
+  since the reset clears the files directory.
 - One take per section is fine. ChatCut cuts on the transcript, so overlap is
   cheap and gaps are expensive: **hold every beat two seconds longer than feels
   right.**
@@ -137,7 +138,13 @@ Other pre-flight:
 
 ## 3. The cut, beat by beat
 
-Total 75s. Word budgets at 2.4 words/second.
+**This is the take 6 cut.** Takes 1 to 5 shot an earlier version where Dana's
+numbers were written out in the email body. Three changes, all in section 3c:
+the numbers now live in an attachment, the ask carries a date, and one beat is
+reserved for a guard firing. Take 5 remains a valid fallback if take 6 does not
+come together.
+
+Total 85s. Word budgets at 2.4 words/second.
 
 ### Beat 1 — Cold open, the empty app (0:00 to 0:07, 7s, ~17 words)
 
@@ -151,10 +158,10 @@ documents". Nothing else moves.
 ### Beat 2 — The email (0:07 to 0:18, 11s, ~26 words)
 
 **On screen:** workspace opens, inbox section, Dana's email at the top, click to
-open it. Hold on the body long enough to read the three regional numbers.
+open it. Hold on the body. The body has no figures in it, only the filename.
 
-> Dana sends the quarterly numbers and asks for two things. A spreadsheet with a
-> total, and a short deck for Friday's review.
+> Dana asks for two things off an export she attached. A clean spreadsheet with
+> a total, and a short deck for the review.
 
 ### Beat 3 — The ask (0:18 to 0:26, 8s, ~19 words)
 
@@ -165,20 +172,29 @@ open it. Hold on the body long enough to read the three regional numbers.
 ### Beat 4 — The plan (0:26 to 0:38, 12s, ~29 words)
 
 **On screen:** plan chips appear across the top, then the first model call
-streams its reasoning. Hold on "Planned 4 steps."
+streams its reasoning. Hold on the step count.
 
-> It writes a plan first, in tool names, not prose. Read the inbox, open Dana's
-> mail, build the sheet, build the deck.
+> It writes a plan first, in tool names, not prose. Open the mail, open the
+> file, build the sheet, build the deck.
 
-### Beat 5 — It looks before it writes (0:38 to 0:50, 12s, ~29 words)
+### Beat 5 — It opens the file (0:38 to 0:52, 14s, ~34 words)
 
-**On screen:** `list_emails` then `read_email` rows land, each with the real
-arguments it sent.
+**On screen:** `read_email`, then `read_spreadsheet` on `q3_raw.xlsx`, with the
+returned rows visible in the call result. Hold on the rows.
 
-> It reads the actual email before it writes anything. That matters more than it
-> sounds: this is where a model that guesses invents your numbers.
+> The numbers were never in the email. It opens the file and reads them. That is
+> the difference between an agent and a model guessing what your figures were.
 
-### Beat 6 — The artifacts land (0:50 to 1:04, 14s, ~34 words)
+### Beat 6 — The harness pushes back (0:52 to 1:04, 12s, ~29 words)
+
+**On screen:** whichever guard fires. See 3c: this beat is reserved, not
+scripted. If nothing fires in the take, cut straight from beat 5 to beat 7 and
+drop these words.
+
+> It does not always get it right first time. When it drifts, the harness asks
+> it a question rather than letting it through.
+
+### Beat 7 — The artifacts land (1:04 to 1:18, 14s, ~34 words)
 
 **On screen:** the workspace opens by itself as the first file is written. The
 spreadsheet renders live, then the deck. Hold on each.
@@ -187,15 +203,37 @@ spreadsheet renders live, then the deck. Hold on each.
 > spreadsheet, with a real formula in the total row. Then the deck, from the
 > same numbers.
 
-### Beat 7 — The proof (1:04 to 1:15, 11s, ~26 words)
+### Beat 8 — The proof (1:18 to 1:29, 11s, ~26 words)
 
-**On screen:** side by side, Dana's email and the total cell showing `=SUM(B2:B4)`.
-Then the end card: model calls, tokens, time.
+**On screen:** side by side, the Q3 column of `q3_raw.xlsx` and the total cell
+showing `=SUM(B2:B4)`. Then the end card: model calls, tokens, time.
 
-> Twelve forty, eight forty-five, six ten. The same three numbers she sent.
-> Seven model calls, eleven seconds, on a laptop.
+> Twelve forty, eight forty-five, six ten. Straight out of her file. Nine model
+> calls, on a laptop.
 
-**Total: ~180 words, 75 seconds.**
+**Total: ~197 words, 85 seconds.**
+
+### 3c. The guard beat, and why it cannot be scripted
+
+Beat 6 is the only beat in this cut that shows the middle of the diagram, and it
+is the only reason the video is not "an AI made a spreadsheet". It is also the
+only beat I cannot promise will happen, because a guard fires when the model
+errs and the model is not obliged to err on cue.
+
+What the fixture does is raise the odds honestly. Three ways it can fire:
+
+- **Planned read before writing.** The plan names `read_spreadsheet` before
+  `create_spreadsheet`; an 8B that jumps to the write is questioned once. Most
+  likely of the three, precisely because the data now lives in a file.
+- **Date mismatch.** Dana's mail says "Wednesday's review" and asks for a
+  Thursday reminder. `set_reminder` is a write with a date, so a wrong ISO date
+  gets caught and quoted back. This is why the reminder is in the ask at all.
+- **Unplanned write.** Fires if the model invents work its own plan never named.
+
+So: shoot three or four takes. If a guard fires in one of them, that is the
+take, and the moment is genuine. If none fires, ship the shorter cut without
+beat 6 rather than staging one. A staged guard is the one thing in this video
+that would be a lie, and it is the exact claim a technical viewer will check.
 
 ---
 
@@ -243,41 +281,69 @@ Your shape is right and I would shoot it first. Three notes.
    interesting engineering and they belong in a second, longer video for a
    technical audience. This one answers "what does it do for me".
 
+   *Revised after take 5.* Point 3 was too absolute. Not narrating the harness
+   left a video that showed a straight pipeline: prompt in, files out, which is
+   what every wrapper looks like. One beat of the loop is worth the twelve
+   seconds (beat 6). The full explanation still belongs in the second video.
+4. **The numbers belong in a file, not in the email body.** Takes 1 to 5 had
+   Dana write the figures out in prose and the agent retype them. That is the
+   exact shape of the worst bug the audit found: an 8B reading numbers from
+   prose invents plausible ones, and on camera nobody can tell the difference
+   until they check. Moving them into `q3_raw.xlsx` makes the tool result the
+   ground truth and makes beat 5 a stronger claim, not a weaker one.
+5. **One seeded email, never a live mailbox.** Sender identity is not part of
+   the story and a live inbox means unrelated mail can ruin a take.
+
 ---
 
 ## 5. Setup script
 
-Seed Dana's email and clear the workspace, run from `standalone/`:
+Reset the agent first, then seed. One command, idempotent, from `standalone/`:
 
-```python
-import json
-p = 'agents/8b/workspace/state.json'
-s = json.load(open(p))
-s['emails'] = [e for e in s['emails'] if e['id'] != 'e11']
-s['emails'].append({
-    "id": "e11", "from": "dana@corp.com", "date": "2026-07-20 08:40",
-    "subject": "Q3 regional numbers - sheet and deck for Friday?",
-    "body": ("Morning! Final Q3 is in. West region $1,240,000; East region $845,000; "
-             "Online $610,000. That is $2,695,000 all in, up 12% on Q2.\n\n"
-             "Could you put these in a spreadsheet with a total, and turn the same "
-             "numbers into a short deck for Friday's review? Thanks, Dana")
-})
-json.dump(s, open(p, 'w'), indent=2, ensure_ascii=False)
+```bash
+../.venv/bin/python ../demo/seed_take6.py
 ```
+
+That writes `agents/8b/workspace/files/q3_raw.xlsx`:
+
+| Region | Q2 | Q3 |
+|---|---|---|
+| West | 1,105,000 | 1,240,000 |
+| East | 802,000 | 845,000 |
+| Online | 498,000 | 610,000 |
+
+and seeds email `e11` from Dana, whose body names the file and contains **no
+figures at all**. Q2 is in the sheet on purpose: the ask is for the Q3 column,
+so picking the right column is work the agent has to actually do rather than
+copy the only thing present.
+
+Verified: `read_spreadsheet('q3_raw.xlsx')` returns those rows, and e11 is the
+newest email so it renders at the top of the inbox panel.
 
 The task typed on camera:
 
-> Read Dana's newest email and do what she asks: build the spreadsheet and the deck
+> Read Dana's newest email and do what she asks
 
-Verified output, against the shim, 7 calls in 10.7s:
+Shorter than the take 5 task on purpose. "build the spreadsheet and the deck"
+told the agent the answer; this version makes it derive both from the mail,
+which is what the video claims it does.
 
-- `q3_numbers.xlsx` — Region/Amount, West 1240000, East 845000, Online 610000,
-  Total `=SUM(B2:B4)`
-- `q3_review.pptx` — three slides: Q3 Review; Regional Numbers with the three
-  figures; Total $2,695,000, 12% up on Q2
+Expected output, three artifacts:
+
+- `q3_numbers.xlsx` — Region/Amount, the three Q3 figures, Total `=SUM(B2:B4)`
+- `q3_review.pptx` — a short deck off the same numbers
+- a reminder on Thursday to send it round
+
+Re-measure the call count and wall time on the day; the take 5 figures (7 calls,
+10.7s) are for the old, easier fixture and will be low for this one.
 
 ## 6. Known risks on the day
 
+- **The take 6 fixture is harder than take 5's, deliberately.** Three artifacts
+  instead of two, a column to choose, and a filename to carry from the email
+  into a tool call. Expect a lower success rate per take and budget more takes.
+  If the 8B cannot land it in four or five attempts, that is a finding worth
+  writing into the audit, not a reason to simplify the fixture back.
 - **The model is not deterministic.** Same prompt, different filenames and slide
   counts run to run. Shoot two or three takes and keep the cleanest. Do not
   re-cut the narration to match a filename.

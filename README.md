@@ -246,7 +246,7 @@ the seam where a `llama-server` backend plus trained GGUF adapters plugs in.
 | `--small TAG` | cheaper model for routing/verify (implies `--tiers`) |
 | `--deep TAG` | on-demand heavy tier (implies `--tiers`) |
 | `--with-office` | keep the simulated office tools alongside the file tools |
-| `--max-calls N` | LLM call budget (default: the profile's, 40 with `--root`) |
+| `--max-calls N` | LLM call budget (default: the profile's, 50 at 8B; at least 40 for real files or real mail) |
 
 ---
 

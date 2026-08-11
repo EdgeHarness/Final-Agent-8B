@@ -110,6 +110,20 @@
           <span class="menu-label">Run details</span>
           <span class="tick" aria-hidden="true">✓</span>
         </label>
+
+        <div class="menu-rule"></div>
+
+        <p class="menu-head">Limits</p>
+        <!-- A ceiling on one run, not a target: an agent that finishes early
+             costs what it costs. It lives here rather than with the run options
+             because it is a standing preference about this machine's patience,
+             not a decision about one task. Blank means the model's own default. -->
+        <label class="menu-row menu-row-field" for="opt-calls">
+          <span class="menu-label">Tool call limit</span>
+          <input type="number" id="opt-calls" min="2" max="200" placeholder="50">
+        </label>
+        <p class="opt-note">Blank uses this model's default. Higher lets a long
+          task finish, lower stops a wandering one sooner.</p>
       </div>
     </div>
   </div>
@@ -274,16 +288,6 @@
                 <input type="text" id="opt-root" placeholder="leave empty for the simulated office">
                 <p class="opt-note">With a folder set the agent gets real read and
                   write file tools scoped to it, and asks before anything destructive.</p>
-              </div>
-            </details>
-            <details class="menu-sub">
-              <summary class="menu-row">
-                <span class="menu-label">Call budget</span>
-                <span class="menu-val" id="calls-set">auto</span>
-                <span class="chev" aria-hidden="true">›</span>
-              </summary>
-              <div class="menu-body">
-                <input type="number" id="opt-calls" min="2" max="80" placeholder="auto">
               </div>
             </details>
 

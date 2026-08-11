@@ -1018,5 +1018,49 @@ class TestRunner(unittest.TestCase):
             self.assertEqual(next_run_index(d), 4)  # a deleted run frees nothing
 
 
+class TestCallBudget(unittest.TestCase):
+    """The ceiling on LLM calls in one run. It is a ceiling, not a target: an
+    agent that calls done early costs whatever it costs."""
+
+    def budget(self, *a, **kw):
+        from webui.runner import call_budget
+        return call_budget(*a, **kw)
+
+    def test_the_shipped_8b_default_is_50(self):
+        self.assertEqual(profiles.for_model("llama3.1:8b").max_calls, 50)
+
+    def test_simulated_work_gets_the_profile_budget(self):
+        p = profiles.for_model("llama3.2:3b")
+        self.assertEqual(self.budget(p), p.max_calls)
+
+    def test_real_work_lifts_a_tight_profile_to_the_floor(self):
+        # A 3B's 14 is a deliberate loop-brake for the simulated office; real
+        # files and real mailboxes cost a call per listing and per read.
+        self.assertEqual(self.budget(profiles.for_model("llama3.2:3b"),
+                                     extended=True), 40)
+
+    def test_real_work_never_lowers_a_generous_profile(self):
+        self.assertEqual(self.budget(profiles.for_model("llama3.1:8b"),
+                                     extended=True), 50)
+
+    def test_an_override_wins_over_both(self):
+        p = profiles.for_model("llama3.1:8b")
+        self.assertEqual(self.budget(p, override=7), 7)
+        self.assertEqual(self.budget(p, override=7, extended=True), 7)
+
+    def test_an_override_is_clamped_at_both_ends(self):
+        # The UI is not the only caller, so the clamp lives here rather than in
+        # the number input's min/max.
+        p = profiles.for_model("llama3.1:8b")
+        self.assertEqual(self.budget(p, override=5000), 200)
+        self.assertEqual(self.budget(p, override=1), 2)
+        self.assertEqual(self.budget(p, override=-3), 2)
+
+    def test_a_blank_override_falls_through_to_the_profile(self):
+        p = profiles.for_model("llama3.1:8b")
+        for blank in (None, 0, ""):
+            self.assertEqual(self.budget(p, override=blank), p.max_calls)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

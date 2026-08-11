@@ -594,6 +594,21 @@ button.menu-row[aria-checked="true"] .tick { opacity: 1; }
 .opt-note {
   font-size: var(--t-meta); line-height: 1.5; color: var(--ink-faint); margin: 8px 0 0;
 }
+/* Same note, sitting under a row rather than under a form: it takes the row's
+   left edge so the menu keeps one margin all the way down. */
+.menu > .opt-note { padding: 0 10px 4px; margin: 2px 0 0; }
+
+/* A row that carries a number instead of a tick. The field is small and right
+   aligned on purpose, so the row still scans as one of the list rather than as
+   a form dropped into the middle of a menu. */
+.menu-row-field input[type="number"] {
+  flex: 0 0 auto; width: 66px; text-align: right;
+  background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-sm);
+  padding: 4px 6px; font: inherit; font-size: var(--t-meta); color: var(--ink);
+}
+.menu-row-field input[type="number"]:focus {
+  outline: none; border-color: var(--ink-faint);
+}
 
 /* Real accounts. Each server is a .menu-row so it reads as one more switch,
    but it carries a second line of description — a name like "ms365-personal"

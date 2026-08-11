@@ -82,7 +82,10 @@ class Profile:
     # model context window
     num_ctx: int = 8192
 
-    # default LLM-call budget for the simulated world (real-file mode still 40)
+    # Ceiling on LLM calls in one run, not a target: an agent that finishes in
+    # four calls costs four. A tight number on a small model is a loop-brake; on
+    # a model that can actually follow a plan it is just a premature cut-off, so
+    # the 8B carries real headroom. webui.runner.call_budget applies it.
     max_calls: int = 14
 
     def to_dict(self):
@@ -124,7 +127,7 @@ PROFILES = {
                   "budget and output length.",
         plan=True, plan_max_steps=5, verify_rounds=2, loop_break=True,
         repeat_limit=3, think_streak_cap=2, num_predict=700, memory_k=3,
-        num_ctx=8192, max_calls=20),
+        num_ctx=8192, max_calls=50),
 
     # --- Qwen 2.5 14B -------------------------------------------------------
     "qwen2.5:14b": Profile(

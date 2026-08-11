@@ -73,9 +73,10 @@ up [[Determinism|reproducibility]], deliberately.
 
 ## Budget
 
-The LLM call budget rises from 20 to **40** in root mode, overriding the
-[[Harness Profiles|profile]] for every model size. At 8B on CPU that is a long
-wall-clock commitment.
+Root mode lifts the [[Harness Profiles|profile]] budget to a floor of **40**,
+so a model given a tight budget for the simulated office gets room to look
+before it writes. The 8B already carries 50 and keeps it. At 8B on CPU that is
+a long wall-clock commitment either way.
 
 ## Related
 

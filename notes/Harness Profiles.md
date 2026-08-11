@@ -34,7 +34,7 @@ cfg["num_ctx"] = cfg.get("num_ctx") or profile.num_ctx
 | `num_predict` | driver reply length cap |
 | `memory_k` | memories auto-injected into the system prompt |
 | `num_ctx` | context window |
-| `max_calls` | budget in the simulated world (real-file mode is always 40) |
+| `max_calls` | ceiling on LLM calls in one run (real-file mode lifts a tighter profile to 40) |
 
 ## The five lineups
 
@@ -80,8 +80,13 @@ fields, filtered against the dataclass so an unknown key is ignored rather than
 crashing. This folder's config sets none, so `llama3.1:8b` gets stock
 **balanced**.
 
-Budget precedence: `--max-calls` > `config.max_calls` > `40 if --root else
+Budget precedence: `--max-calls` (or the app's **Tool call limit** preference)
+> `config.max_calls` > `max(profile.max_calls, 40) if --root else
 profile.max_calls`. Context: `config.num_ctx` > `profile.num_ctx`.
+
+The floor replaced a doubling, which replaced a flat 40. Doubling made sense
+while the 8B sat at 20; once it carries 50 of its own, doubling to 100 in root
+mode is not headroom, it is a runaway with a longer leash.
 
 > [!note] The benchmark never sets a profile
 > `bench/` runs with `DEFAULT` so the [[Raw vs Harness]] comparison stays

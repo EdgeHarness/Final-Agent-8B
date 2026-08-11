@@ -128,6 +128,32 @@ def next_run_index(log_dir):
     return max(used, default=0) + 1
 
 
+CALL_CEILING = 200
+CALL_FLOOR = 2
+REAL_WORK_FLOOR = 40
+
+
+def call_budget(profile, override=None, extended=False):
+    """LLM calls one run may spend, before the loop stops it.
+
+    A ceiling, not a target: an agent that calls done in four calls costs four,
+    so headroom is cheap and a tight number mostly buys premature cut-offs.
+
+    `override` is the user's own number, from the preferences menu or --max-calls,
+    and it wins outright - clamped, because this is the trust boundary. A number
+    input's min/max is a hint to a browser, not a constraint on the HTTP API.
+
+    `extended` means real files or real accounts are in play. That work costs
+    more calls than the simulated office, since the agent has to look before it
+    writes and every listing is a whole call. It raises a tight profile to a
+    floor rather than scaling it, so a model already given room keeps its own
+    number instead of being doubled into a runaway.
+    """
+    if override:
+        return max(CALL_FLOOR, min(int(override), CALL_CEILING))
+    return max(profile.max_calls, REAL_WORK_FLOOR) if extended else profile.max_calls
+
+
 def world_snapshot(world, mem, root=None):
     snap = {
         "emails": world.emails,
@@ -307,14 +333,9 @@ def main():
         today = datetime.date.today()
         agent_mod.SIM_TODAY = today
         agent_mod.SIM_TODAY_HUMAN = today.strftime("%A, %B %d, %Y")
-    # Real-folder and real-account work both cost more calls than the simulated
-    # office: the agent has to look before it writes, and every listing or read
-    # is a whole call. This was a flat 40 for every model - a number picked for
-    # the 8B and applied to a 1B and a 32B alike. Doubling the profile's budget
-    # keeps the shipped 8B at exactly 40 and lets the rest scale with the model.
-    agent_mod.MAX_CALLS = (args.max_calls or cfg.get("max_calls")
-                           or (profile.max_calls * 2 if (root or names)
-                               else profile.max_calls))
+    agent_mod.MAX_CALLS = call_budget(profile,
+                                      override=args.max_calls or cfg.get("max_calls"),
+                                      extended=bool(root or names))
 
     world = World(os.path.join(folder, "workspace"), persistent=True)
     mem = MemoryStore(os.path.join(folder, "memory", "memory.jsonl"))
