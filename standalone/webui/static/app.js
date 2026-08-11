@@ -66,11 +66,9 @@ async function loadAgents(keep) {
   const data = await api('/api/agents');
   S.agents = data.agents;
   S.available = data.available || [];
-  // whether a model can be pulled in place, or only by a command you run
-  S.ollama = !!data.ollama;
   $('meter-ollama').className = 'meter dotmeter ' + (data.ollama ? 'up' : 'down');
   $('meter-ollama').querySelector('.label').textContent =
-    data.ollama ? 'ollama running' : 'ollama not running';
+    data.ollama ? 'Ollama running' : 'Ollama not running';
   renderPresets(data.presets);
   renderAgents();
   renderModels(data.installed_models);
@@ -120,34 +118,29 @@ function agentRow(a) {
   return card;
 }
 
-/* Three ways a model can arrive, and the row offers whichever is possible.
-   Ollama reachable: pull it in place, which the server already streams.
-   Ollama not reachable: the command to run, one click to copy, because the
-   button cannot do it for you and telling you to "install ollama" without the
-   command is a dead end. Either way, a link to the model's page. */
+/* The command to run, one click to copy, plus a link to the model's own page.
+   There used to be a Download button here that posted to the local ollama's
+   /api/pull and streamed progress in place. It was removed: it only works
+   against a real ollama, and anything else answering on that port (an
+   OpenAI-compatible proxy, say) returns 404, so the row's reward for a click
+   was a raw HTTPError quoting a 127.0.0.1 URL at someone who cannot act on it.
+   The command works on every machine and says exactly what it will do. */
 function downloadRow(a, cat) {
   const row = el('div', 'agent-get');
   const cmd = cat.pull || `ollama pull ${a.model}`;
 
-  if (S.ollama) {
-    const btn = el('button', 'ghost small', 'Download');
-    btn.type = 'button';
-    btn.onclick = (e) => { e.stopPropagation(); pullModel(a, row); };
-    row.append(btn);
-  } else {
-    const copy = el('button', 'cmd', '');
-    copy.type = 'button';
-    copy.title = 'Copy this command';
-    copy.append(el('code', null, cmd), el('span', 'cmd-hint', 'copy'));
-    copy.onclick = (e) => {
-      e.stopPropagation();
-      navigator.clipboard.writeText(cmd).then(
-        () => { copy.querySelector('.cmd-hint').textContent = 'copied'; },
-        () => { copy.querySelector('.cmd-hint').textContent = 'select it'; });
-      setTimeout(() => { copy.querySelector('.cmd-hint').textContent = 'copy'; }, 1600);
-    };
-    row.append(copy);
-  }
+  const copy = el('button', 'cmd', '');
+  copy.type = 'button';
+  copy.title = 'Copy this command';
+  copy.append(el('code', null, cmd), el('span', 'cmd-hint', 'copy'));
+  copy.onclick = (e) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(cmd).then(
+      () => { copy.querySelector('.cmd-hint').textContent = 'copied'; },
+      () => { copy.querySelector('.cmd-hint').textContent = 'select it'; });
+    setTimeout(() => { copy.querySelector('.cmd-hint').textContent = 'copy'; }, 1600);
+  };
+  row.append(copy);
 
   if (cat.url) {
     const link = el('a', 'agent-link', 'Model page');
@@ -201,29 +194,6 @@ function renderAvailable(q) {
     box.append(row);
   }
   $('rail-more').classList.toggle('hidden', !shown.length);
-}
-
-function pullModel(a, row) {
-  row.textContent = `downloading ${a.model}…`;
-  const bar = el('div', 'pull-bar');
-  const fill = el('i');
-  bar.append(fill);
-  row.after(bar);
-  const es = new EventSource(`/api/pull?model=${encodeURIComponent(a.model)}`);
-  es.onmessage = (e) => {
-    const m = JSON.parse(e.data);
-    if (m.t === 'pull') {
-      fill.style.transform = `scaleX(${m.total ? m.completed / m.total : 0})`;
-      row.textContent = `${m.status}${m.total ? ` — ${bytes(m.completed)} / ${bytes(m.total)}` : ''}`;
-    } else if (m.t === 'error') {
-      row.textContent = m.message;
-      es.close();
-    } else if (m.t === 'closed') {
-      es.close();
-      loadAgents(true);
-    }
-  };
-  es.onerror = () => es.close();
 }
 
 async function selectAgent(id) {
@@ -1364,6 +1334,16 @@ function growTask() {
   taskBox.style.height = Math.min(taskBox.scrollHeight, 180) + 'px';
 }
 taskBox.addEventListener('input', growTask);
+
+/* Enter sends, Shift+Enter writes a newline, the way every chat box works.
+   IME composition is exempt: mid-composition Enter commits the candidate word
+   and must not also fire the run, which is how a Korean or Japanese task gets
+   sent half-typed. */
+taskBox.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
+  e.preventDefault();
+  if (!$('run').disabled) startRun();
+});
 
 /* --- the two side panels ------------------------------------------------- */
 /* Both closed by default. The conversation is the product; a rail of models

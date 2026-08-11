@@ -38,6 +38,11 @@
      opaque panels and vanishes against a translucent one. */
   --glass: rgba(28, 28, 28, .68);
   --glass-line: rgba(255, 255, 255, .09);
+  /* The top bar carries no surface of its own on dark: a lighter band there
+     made the product's own name look like it belonged to a different app than
+     the one underneath. On light the panel is white against a grey page, which
+     already reads as one surface with an edge, so light keeps its band. */
+  --topbar: var(--bg);
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
 
@@ -78,6 +83,7 @@
     --ink: #0d0d0d; --ink-dim: #5d5d5d; --ink-faint: #696969;
     --accent: #0d0d0d; --accent-soft: rgba(0, 0, 0, .07); --on-accent: #ffffff;
     --think: #5d5d5d; --think-soft: rgba(0, 0, 0, .05);
+    --topbar: var(--panel);
     --glass: rgba(255, 255, 255, .72); --glass-line: rgba(0, 0, 0, .08);
     /* The status colours are tuned for dark surfaces and land at 2.1 to 3.0:1
        on light ones, so the light theme carries its own darker set. A palette
@@ -98,6 +104,7 @@
   --ink: #0d0d0d; --ink-dim: #5d5d5d; --ink-faint: #696969;
   --accent: #0d0d0d; --accent-soft: rgba(0, 0, 0, .07); --on-accent: #ffffff;
   --think: #5d5d5d; --think-soft: rgba(0, 0, 0, .05);
+  --topbar: var(--panel);
   --glass: rgba(255, 255, 255, .72); --glass-line: rgba(0, 0, 0, .08);
   --good: #276749; --good-soft: rgba(39, 103, 73, .11);
   --warn: #7a5100; --warn-soft: rgba(122, 81, 0, .11);
@@ -163,7 +170,7 @@ button, input, textarea, select { font-family: inherit; color: inherit; }
 .topbar {
   display: flex; align-items: center; gap: 14px;
   padding: 10px 18px;
-  background: var(--panel); border-bottom: 1px solid var(--line);
+  background: var(--topbar); border-bottom: 1px solid var(--line);
   flex: 0 0 auto;
 }
 /* The wordmark used to inherit the 16px body default, an unplanned fifth size
@@ -175,7 +182,7 @@ button, input, textarea, select { font-family: inherit; color: inherit; }
    The aspect ratio comes from the file (1214x352), so the height is the only
    number here and the width follows. */
 .logo {
-  display: block; height: 21px; width: calc(21px * 1214 / 352);
+  display: block; height: 26px; width: calc(26px * 1214 / 352);
   background-color: var(--ink);
   -webkit-mask: url("/static/logo.png") no-repeat center / contain;
   mask: url("/static/logo.png") no-repeat center / contain;
@@ -204,20 +211,19 @@ button, input, textarea, select { font-family: inherit; color: inherit; }
 .meter.warn b { color: var(--warn); }
 .meter.bad b { color: var(--bad); }
 
-/* The one meter that is a status, not a number, so it keeps a pill and a dot
-   rather than pretending to be part of the numeric row. */
-.dotmeter {
-  flex-direction: row; align-items: center; gap: 7px;
-  background: var(--panel-2); border: 1px solid var(--line);
-  border-radius: var(--r-full); padding: 4px 11px;
-}
-.dotmeter .label { font-size: var(--t-meta); color: var(--ink-faint); }
+/* A status, not a number, but it is still a readout and not a control. It used
+   to wear a bordered pill and a glowing halo around the dot, which made the one
+   thing in the bar you cannot click look more clickable than the button beside
+   it. Stripped to a dot and a word: the only pill left up here is the one you
+   can actually press. */
+.dotmeter { flex-direction: row; align-items: center; gap: 7px; }
+.dotmeter .label { font-size: var(--t-sm); color: var(--ink-dim); }
 .meter .dot {
-  width: 7px; height: 7px; border-radius: 50%;
-  background: var(--ink-faint); box-shadow: 0 0 0 3px transparent;
+  width: 6px; height: 6px; border-radius: 50%; flex: 0 0 auto;
+  background: var(--ink-faint);
 }
-.meter.up .dot { background: var(--good); box-shadow: 0 0 0 3px var(--good-soft); }
-.meter.down .dot { background: var(--bad); box-shadow: 0 0 0 3px var(--bad-soft); }
+.meter.up .dot { background: var(--good); }
+.meter.down .dot { background: var(--bad); }
 /* ref 10: the progress track is the extra-small step, matching M3's 4dp track. */
 .meter .bar {
   width: 100%; height: 3px; border-radius: var(--r-xs); overflow: hidden;
@@ -446,11 +452,6 @@ body.resizing { user-select: none; cursor: col-resize; }
 .agent.avail { cursor: default; }
 .agent.avail:hover { background-color: transparent; }
 .agent.avail .agent-desc { display: block; }
-.pull-bar { height: 3px; border-radius: var(--r-xs); background: var(--line); overflow: hidden; margin-top: 6px; }
-.pull-bar i {
-  display: block; height: 100%; width: 100%; background: var(--warn);
-  transform: scaleX(0); transform-origin: left; transition: transform .3s;
-}
 
 /* ------------------------------------------------------------- options --- */
 

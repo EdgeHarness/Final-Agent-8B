@@ -631,8 +631,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                        "status": run.status if run else "idle"})
             if path == "/api/events":
                 return self.stream_events(q)
-            if path == "/api/pull":
-                return self.stream_pull(q.get("model", ""))
         except ValueError as e:
             return self.send_json({"error": str(e)}, 400)
         except FileNotFoundError as e:
@@ -748,35 +746,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
             pass
         finally:
             run.unsubscribe(sub)
-
-    def stream_pull(self, model):
-        """Download a model from the picker, so 'run the 14B' never means
-        leaving the page for a terminal."""
-        self.open_stream()
-        self.close_connection = True
-        if not model:
-            return self.push({"t": "error", "message": "no model given"})
-        try:
-            with requests.post(f"{OLLAMA_URL}/api/pull", json={"model": model},
-                               stream=True, timeout=None) as r:
-                r.raise_for_status()
-                for line in r.iter_lines(decode_unicode=True):
-                    if not line:
-                        continue
-                    msg = json.loads(line)
-                    self.push({"t": "pull", "status": msg.get("status", ""),
-                               "completed": msg.get("completed", 0),
-                               "total": msg.get("total", 0),
-                               "error": msg.get("error")})
-            self.push({"t": "closed", "status": "done"})
-        except (BrokenPipeError, ConnectionResetError):
-            pass
-        except Exception as e:
-            try:
-                self.push({"t": "error", "message": f"{type(e).__name__}: {e}"})
-            except OSError:
-                pass
-
 
 class Server(http.server.ThreadingHTTPServer):
     daemon_threads = True
