@@ -84,12 +84,17 @@
            be focused cannot be scrolled from the keyboard at all. -->
       <div class="feed" tabindex="0" role="log" aria-label="Run timeline">
         <div class="feed-in" id="timeline"></div>
+        <!-- A lead line saying what the product is, then one line saying what
+             to do. The copy stays inside what this screen can actually back
+             up: the office tools and file tools are wired here, the MCP bridge
+             to real Outlook and Gmail accounts is not. -->
         <div id="empty" class="empty">
           <div class="empty-art">◆</div>
           <h3>Nothing running</h3>
-          <p>Choose a model on the left, pick or type a task, and press Run.
-             Every step, the plan, each token the model writes, every tool call
-             and its result, shows up here as it happens.</p>
+          <p class="empty-lead">An agent that handles inbox, calendar and document
+             work, driven by a model running on this machine. Nothing leaves it.</p>
+          <p>Choose a model, describe a task, and press Run. The plan, every token
+             the model writes and every tool call appears here as it happens.</p>
         </div>
       </div>
 

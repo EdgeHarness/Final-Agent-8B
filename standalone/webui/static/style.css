@@ -453,8 +453,13 @@ button.ghost:hover, a.ghost:hover { color: var(--ink); }
 .empty { text-align: center; padding: 48px 20px; }
 .empty-art { font-size: 34px; color: var(--line); margin-bottom: 10px; }
 .empty h3 { font-size: var(--t-lg); color: var(--ink-dim); font-weight: 500; }
-.empty p { max-width: 400px; margin: 8px auto 0; font-size: var(--t-sm);
+.empty p { max-width: 420px; margin: 8px auto 0; font-size: var(--t-sm);
   line-height: var(--lh-read); color: var(--ink-faint); }
+/* The lead says what the product is and the line under it says what to do, so
+   they should not read as one undifferentiated paragraph of grey. */
+.empty p.empty-lead {
+  color: var(--ink-dim); font-size: var(--t-base); margin-top: 10px;
+}
 
 /* the run banner: one row of facts, not a card competing with the end card */
 .banner-task { font-size: var(--t-base); font-weight: 600; line-height: 1.35;
