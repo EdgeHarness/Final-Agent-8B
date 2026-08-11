@@ -828,6 +828,58 @@ class TestSpreadsheetPreview(unittest.TestCase):
         self.assertEqual(_cell_text(2026, True, Plain()), "2026")
 
 
+class TestServerGuards(unittest.TestCase):
+    def test_reset_refuses_while_that_agent_is_mid_run(self):
+        """Reset mid-run silently undid itself: the live subprocess snapshots
+        on exit, so the deleted state.json reappeared carrying the pre-reset
+        world. One thing owns the folder at a time; the answer is 409."""
+        from webui import server
+
+        class Proc:
+            def poll(self):
+                return None      # still running
+
+        class Live:
+            agent = "8b"
+            proc = Proc()
+
+        saved = server.RUNS.current
+        server.RUNS.current = Live()
+        try:
+            with self.assertRaises(RuntimeError):
+                server.ensure_idle("8b")
+            server.ensure_idle("other-agent")   # a different folder is fine
+        finally:
+            server.RUNS.current = saved
+
+    def test_reset_is_allowed_once_the_run_has_exited(self):
+        from webui import server
+
+        class Proc:
+            def poll(self):
+                return 0         # exited
+
+        class Done:
+            agent = "8b"
+            proc = Proc()
+
+        saved = server.RUNS.current
+        server.RUNS.current = Done()
+        try:
+            server.ensure_idle("8b")
+        finally:
+            server.RUNS.current = saved
+
+    def test_stop_unwinds_instead_of_killing(self):
+        """Stop sends SIGTERM and Python's default is to die without
+        unwinding, so the crash-safe snapshot never ran for a STOPPED run.
+        The handler turns the signal into SystemExit, which runs finallys."""
+        from webui.runner import _on_terminate
+        with self.assertRaises(SystemExit) as cm:
+            _on_terminate(15, None)
+        self.assertEqual(cm.exception.code, 143)
+
+
 # ------------------------------------------------------------------- runner ---
 
 class TestRunner(unittest.TestCase):

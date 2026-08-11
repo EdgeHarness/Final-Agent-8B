@@ -432,6 +432,20 @@ def preview(agent, name):
             "text": blob.decode("utf-8", errors="replace")}
 
 
+def ensure_idle(agent):
+    """Refuse to touch an agent's folder while its run is live.
+
+    Reset mid-run did not just race - it silently UNDID itself: the running
+    subprocess holds the world in memory and snapshots on exit, so the freshly
+    deleted state.json reappeared seconds later carrying the pre-reset world.
+    The user saw the reset succeed and then saw the old inbox come back.
+    Same contract as starting a second run: one thing owns the folder at a
+    time, and the answer is 409, not corruption."""
+    run = RUNS.current
+    if run and run.agent == agent and run.proc.poll() is None:
+        raise RuntimeError(f"{agent} is mid-run - stop the run first, then reset")
+
+
 def reset_agent(agent, what):
     folder = agent_dir(agent)
     done = []
@@ -696,6 +710,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self.send_json({"ok": ok})
             if path == "/api/reset":
                 what = set(body.get("what") or [])
+                ensure_idle(body.get("agent", ""))
                 return self.send_json({"cleared": reset_agent(body.get("agent", ""), what)})
             if path == "/api/reveal":
                 agent = body.get("agent", "")

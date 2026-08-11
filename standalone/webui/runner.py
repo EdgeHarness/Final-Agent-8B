@@ -24,6 +24,7 @@ import datetime
 import json
 import os
 import re
+import signal
 import sys
 import time
 import traceback
@@ -181,7 +182,18 @@ def build_llm(cfg, args, log_dir):
     return router, router
 
 
+def _on_terminate(signum, frame):
+    """Stop in the UI sends SIGTERM, and Python's default reaction is to die
+    without unwinding - so the harness's finally never ran and a STOPPED run
+    lost its world writes exactly the way a crashed one used to. Raising
+    SystemExit turns the signal into ordinary unwinding: the snapshot in
+    run_harness's finally executes, the hooks are cleared, and the process
+    still exits nonzero. 143 is the conventional code for death by SIGTERM."""
+    raise SystemExit(143)
+
+
 def main():
+    signal.signal(signal.SIGTERM, _on_terminate)
     p = argparse.ArgumentParser()
     p.add_argument("--agent", required=True)
     p.add_argument("--task", required=True)
