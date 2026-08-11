@@ -34,3 +34,6 @@ runs/*
 standalone/llamacpp/llama.cpp/
 standalone/llamacpp/build-*/
 *.gguf
+
+# --- Conversation threads (local, not source) ---
+standalone/agents/*/chat/

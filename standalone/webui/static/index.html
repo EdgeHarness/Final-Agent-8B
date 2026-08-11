@@ -30,6 +30,10 @@
   <!-- The lockup itself, masked rather than drawn as an <img>: the art is a
        white-on-transparent PNG, so using its alpha as a mask lets the ink
        colour come from the theme and the logo reads correctly on both. -->
+  <!-- The reference for this layout keeps the conversation list pinned, so the
+       rail needs a way back once it is dismissed. -->
+  <button class="rail-btn" id="rail-btn" type="button" aria-label="Toggle conversations"
+          aria-pressed="true">▤</button>
   <div class="mark">
     <span class="logo" role="img" aria-label="AgentLab"></span>
     <span class="mark-sub">your private assistant</span>
@@ -115,6 +119,20 @@
 
   <!-- ------------------------------------------------------------ models -->
   <aside class="rail">
+    <!-- Conversations first: which thread you are in is the question you ask on
+         opening the app, and which model runs it is one you answer once. -->
+    <div class="chats">
+      <button class="newchat" id="new-chat" type="button">
+        <span class="newchat-ico" aria-hidden="true">✎</span> New chat
+      </button>
+      <div id="threads" class="threads" role="list"></div>
+      <p class="rail-none" id="threads-none">No conversations yet.</p>
+    </div>
+
+    <!-- Folded by default. Which model runs the thread is answered once; the
+         conversation list is what the sidebar is for. -->
+    <details class="rail-models">
+      <summary class="rail-sum">Models <span class="rail-sum-n" id="rail-sum-n"></span></summary>
     <div class="rail-head">
       <h2 class="rail-title">Models</h2>
       <span class="rail-count" id="agent-count"></span>
@@ -137,6 +155,7 @@
       <h3 class="rail-sub">Available to download</h3>
       <div id="available" class="agents"></div>
     </div>
+    </details>
 
   </aside>
 
@@ -157,6 +176,10 @@
       <!-- tabindex=0 on the scroll containers: a scrollable region that cannot
            be focused cannot be scrolled from the keyboard at all. -->
       <div class="feed" tabindex="0" role="log" aria-label="Run timeline">
+        <!-- The conversation so far. The live run's reasoning streams into the
+             timeline below it, so a turn reads as: what you asked, what it did,
+             what it answered. -->
+        <div class="thread-log" id="thread"></div>
         <div class="feed-in" id="timeline"></div>
         <!-- Shows once, before the first run of a session, then is hidden for
              good. It is a welcome screen, not a status, so it greets rather
@@ -165,7 +188,7 @@
              The mark carries the name, so the headline does not repeat it. -->
         <div id="empty" class="empty">
           <span class="empty-mark" role="img" aria-label="AgentLab"></span>
-          <h3>Run your inbox, calendar and documents</h3>
+          <h3>What can I help you with?</h3>
           <p>Pick a model, say what you want, press Run. Nothing leaves this machine.</p>
         </div>
       </div>

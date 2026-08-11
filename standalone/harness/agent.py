@@ -419,7 +419,11 @@ def plan_step(llm, messages, ep):
     return plan
 
 
-def run_harness(llm, world, mem, task_text):
+def run_harness(llm, world, mem, task_text, history=""):
+    """history: prior conversation turns as a text block (harness/chat.py
+    prompt_block). Empty by default, so a run with no conversation behind it
+    builds byte-identical context to before — the same opt-in shape as
+    EXTRA_RULES."""
     ep = Episode()
     memories = mem.search(task_text, k=PROFILE.memory_k)  # only matches, no recency fallback
     memory_block = ""
@@ -436,7 +440,7 @@ def run_harness(llm, world, mem, task_text):
     system = HARNESS_SYSTEM.format(today=SIM_TODAY_HUMAN, shape=SHAPE,
                                    docs=tool_docs(with_examples=True),
                                    memory_block=memory_block,
-                                   extra_rules=EXTRA_RULES)
+                                   extra_rules=EXTRA_RULES + (history or ""))
     messages = [{"role": "system", "content": system}]
     ep.note("system", system)
     ep.note("task", task_text)

@@ -34,6 +34,7 @@ PROJECT = os.path.dirname(HERE)
 sys.path.insert(0, PROJECT)
 
 from harness import agent as agent_mod  # noqa: E402
+from harness import chat  # noqa: E402
 from harness import fs_tools  # noqa: E402
 from harness import llm as llm_mod  # noqa: E402
 from harness import mcp_bridge  # noqa: E402
@@ -242,6 +243,8 @@ def main():
     p.add_argument("--small", default=None)
     p.add_argument("--deep", default=None)
     p.add_argument("--with-office", action="store_true")
+    p.add_argument("--thread", default=None,
+                   help="conversation thread id; earlier turns enter the prompt")
     p.add_argument("--mcp", default=None,
                    help="comma-separated MCP servers from mcp/servers.json")
     p.add_argument("--mcp-mode", default=None,
@@ -315,6 +318,10 @@ def main():
 
     world = World(os.path.join(folder, "workspace"), persistent=True)
     mem = MemoryStore(os.path.join(folder, "memory", "memory.jsonl"))
+    # Earlier turns of this conversation, if this run belongs to one. The server
+    # writes the turns; the runner only reads them, so a run started from the
+    # CLI with no --thread behaves exactly as it always did.
+    history = chat.prompt_block(chat.messages(folder, args.thread)) if args.thread else ""
     log_dir = os.path.join(folder, "logs")
     llm, router = build_llm(cfg, args, log_dir)
 
@@ -370,7 +377,7 @@ def main():
     tools_mod.TOOL_HOOK = on_tool
 
     try:
-        ep = run_harness(llm, world, mem, args.task)
+        ep = run_harness(llm, world, mem, args.task, history=history)
     except Exception as e:
         emit("error", message=f"{type(e).__name__}: {e}", trace=traceback.format_exc())
         raise SystemExit(1)

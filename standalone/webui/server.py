@@ -34,6 +34,7 @@ OLLAMA_URL = "http://127.0.0.1:11434"
 DEFAULT_PORT = 8765
 
 sys.path.insert(0, PROJECT)
+from harness import chat  # noqa: E402
 from harness import mcp_config  # noqa: E402
 from harness import profiles  # noqa: E402
 
@@ -560,6 +561,8 @@ class Runs:
                 cmd += ["--max-calls", str(int(options["max_calls"]))]
             if options.get("model"):
                 cmd += ["--model", options["model"]]
+            if options.get("thread"):
+                cmd += ["--thread", options["thread"]]
             if options.get("mcp"):
                 cmd += ["--mcp", options["mcp"]]
             if options.get("mcp_mode"):
@@ -569,6 +572,8 @@ class Runs:
                                     encoding="utf-8", errors="replace", bufsize=1,
                                     stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                     stderr=subprocess.PIPE)
+            if options.get("thread"):
+                chat.append(agent_dir(agent), options["thread"], "user", task)
             run = Run(self.next_id, agent, task, proc, options)
             self.next_id += 1
             self.current = run
@@ -595,6 +600,19 @@ class Runs:
             tail = "".join(stderr)[-1500:].strip()
             run.add({"t": "error", "message": f"the run exited with code {code}",
                      "trace": tail})
+        # The agent's reply to the conversation is its done() summary. Recorded
+        # here rather than in the runner so a crashed or stopped run still
+        # leaves an honest turn in the thread instead of a silent gap.
+        tid = run.options.get("thread")
+        if tid:
+            end = next((e for e in reversed(run.events) if e.get("t") == "end"), None)
+            if end and end.get("summary"):
+                reply = end["summary"]
+            elif run.status == "stopped":
+                reply = "(stopped)"
+            else:
+                reply = "(the run ended without a summary)"
+            chat.append(agent_dir(run.agent), tid, "assistant", reply, run=run.id)
         run.add({"t": "closed", "status": run.status, "code": code})
 
 
@@ -674,6 +692,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 name = os.path.basename(q.get("name", ""))
                 with open(os.path.join(folder, "logs", name), encoding="utf-8") as f:
                     return self.send_json(json.load(f))
+            if path == "/api/threads":
+                return self.send_json({"threads": chat.threads(agent_dir(q.get("agent", "")))})
+            if path == "/api/thread":
+                folder = agent_dir(q.get("agent", ""))
+                return self.send_json({"id": q.get("id", ""),
+                                       "messages": chat.messages(folder, q.get("id", ""))})
             if path == "/api/mcp":
                 # The registry, for the run panel's account picker. Setup notes
                 # come along so the UI can say what a server needs before it works.
@@ -701,6 +725,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         path, _ = self.query()
         try:
             body = self.body_json()
+            if path == "/api/thread/new":
+                folder = agent_dir(body.get("agent", ""))
+                return self.send_json({"id": chat.create(folder, body.get("task", ""))})
+            if path == "/api/thread/delete":
+                folder = agent_dir(body.get("agent", ""))
+                return self.send_json({"deleted": chat.delete(folder, body.get("id", ""))})
             if path == "/api/run":
                 agent = body.get("agent", "")
                 task = (body.get("task") or "").strip()
@@ -716,6 +746,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                            "tiers": body.get("tiers"), "small": body.get("small"),
                            "deep": body.get("deep"), "max_calls": body.get("max_calls"),
                            "model": (body.get("model") or "").strip() or None,
+                           "thread": (body.get("thread") or "").strip() or None,
                            "mcp": ",".join(body.get("mcp") or []) or None,
                            "mcp_mode": body.get("mcp_mode") or None}
                 run = RUNS.start(agent, task, options)

@@ -92,6 +92,7 @@ const TOUCH_ARG = { ...ARTIFACT_ARG, write_file: 'path', append_file: 'path' };
 const S = {
   agents: [], agent: null, ws: null, run: null, es: null,
   call: null, t0: 0, timer: null, seen: {}, first: true,
+  thread: null, resumed: false,
   open: new Set(['files', 'inbox', 'calendar']),
 };
 
@@ -233,6 +234,9 @@ function renderAvailable(q) {
 
 async function selectAgent(id) {
   S.agent = id;
+  /* Threads belong to an agent folder, so switching model switches the
+     conversation list with it rather than showing another agent's. */
+  if (S.thread) newChat(); else loadThreads();
   S.first = true;
   S.seen = {};
   renderAgents();
@@ -1244,8 +1248,15 @@ async function startRun() {
   if (!S.agent) return;
   const task = $('task').value.trim();
   if (!task) { $('task').focus(); return; }
+  /* The thread is created from the first message rather than by the New chat
+     button, so an empty conversation never appears in the sidebar. */
+  if (!S.thread) {
+    try {
+      S.thread = (await post('/api/thread/new', { agent: S.agent, task })).id;
+    } catch (err) { /* a thread is a nicety; the run should still go */ }
+  }
   const body = {
-    agent: S.agent, task,
+    agent: S.agent, task, thread: S.thread,
     root: $('opt-root').value.trim(),
     shell: $('opt-shell').checked,
     yolo: $('opt-yolo').checked,
@@ -1284,6 +1295,7 @@ function finishRun() {
   $('stop').classList.add('hidden');
   loadAgents(true);
   loadWorkspace();
+  refreshThread();
 }
 
 /* --------------------------------------------------------------- chrome -- */
@@ -1431,6 +1443,92 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !optsBox.hidden) { setOpts(false); optsBtn.focus(); }
 });
 
+
+/* ------------------------------------------------------ conversations --- */
+
+/* A thread is the unit the app is organised around; a run is one turn inside
+   it. The sidebar lists threads, the feed shows the turns, and the live run
+   streams under the newest one. */
+async function loadThreads() {
+  if (!S.agent) return;
+  let list = [];
+  try {
+    list = (await api(`/api/threads?agent=${encodeURIComponent(S.agent)}`)).threads;
+  } catch (err) { return; }
+  /* Reopen where you left off. A local app with one user has no reason to
+     greet a returning session with a blank page it has to be told about. */
+  if (S.thread === null && !S.run && list.length && !S.resumed) {
+    S.resumed = true;
+    openThread(list[0].id);
+    return;
+  }
+  const box = $('threads');
+  box.textContent = '';
+  $('threads-none').classList.toggle('hidden', list.length > 0);
+  for (const t of list) {
+    const row = el('button', 'thread-row' + (t.id === S.thread ? ' on' : ''));
+    row.type = 'button';
+    row.setAttribute('role', 'listitem');
+    row.append(el('span', 'thread-title', t.title));
+    const del = el('button', 'thread-del', '✕');
+    del.type = 'button';
+    del.title = 'Delete this conversation';
+    del.onclick = async (ev) => {
+      ev.stopPropagation();
+      await post('/api/thread/delete', { agent: S.agent, id: t.id });
+      if (S.thread === t.id) newChat();
+      loadThreads();
+    };
+    row.append(del);
+    row.onclick = () => openThread(t.id);
+    box.append(row);
+  }
+}
+
+async function openThread(id) {
+  S.thread = id;
+  let msgs = [];
+  try {
+    msgs = (await api(`/api/thread?agent=${encodeURIComponent(S.agent)}&id=${id}`)).messages;
+  } catch (err) { /* fall through to an empty thread */ }
+  $('timeline').textContent = '';          // the previous turn's reasoning
+  renderThread(msgs);
+  loadThreads();
+}
+
+function newChat() {
+  S.thread = null;
+  $('timeline').textContent = '';
+  $('thread').textContent = '';
+  $('empty').classList.remove('hidden');
+  loadThreads();
+  $('task').focus();
+}
+
+function renderThread(msgs) {
+  const box = $('thread');
+  box.textContent = '';
+  for (const m of msgs) {
+    const turn = el('div', `turn ${m.role}`);
+    turn.append(el('div', 'turn-text', m.text));
+    box.append(turn);
+  }
+  $('empty').classList.toggle('hidden', msgs.length > 0);
+  box.scrollIntoView({ block: 'end' });
+}
+
+/* The reply lands in the thread only once the run has closed, because that is
+   when the server has written it. Re-reading is cheaper than duplicating the
+   server's rule for what counts as the answer. */
+async function refreshThread() {
+  if (!S.thread) return;
+  try {
+    const d = await api(`/api/thread?agent=${encodeURIComponent(S.agent)}&id=${S.thread}`);
+    renderThread(d.messages);
+  } catch (err) { /* leave what is on screen */ }
+  loadThreads();
+}
+
 /* ----------------------------------------------- real accounts (mcp) --- */
 
 /* The registry, fetched once — mcp/servers.json is static for the life of the
@@ -1537,9 +1635,16 @@ function setWorkspace(open) {
 }
 function setRail(open) {
   document.body.classList.toggle('rail-open', open);
-  if (open) $('agent-filter').focus();
 }
 $('ws-btn').onclick = () => setWorkspace(!document.body.classList.contains('ws-open'));
+/* The rail holds conversations now, not just a list of models, so it starts
+   open: which thread you are in is the first thing the app should answer. */
+$('rail-btn').onclick = () => {
+  const open = !document.body.classList.contains('rail-open');
+  setRail(open);
+  $('rail-btn').setAttribute('aria-pressed', open ? 'true' : 'false');
+};
+document.body.classList.add('rail-open');
 $('rail-close').onclick = () => setRail(false);
 $('model').addEventListener('change', (e) => {
   if (e.target.value !== MORE) return;
@@ -1586,6 +1691,7 @@ growTask();
 
 loadAgents();
 loadMcp();
+$('new-chat').onclick = newChat;
 setInterval(() => { if (!S.run) loadAgents(true); }, 20000);
 
 /* Registering the worker is what makes the browser offer "Install app". Nothing

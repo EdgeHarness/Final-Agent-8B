@@ -1359,3 +1359,73 @@ table.grid td.formula::after { content: ' ƒ'; font-size: 9px; color: var(--ink-
   body.rail-open .layout { grid-template-columns: 100% 0; }
   body.rail-open .rail { border-right: 0; }
 }
+
+/* ------------------------------------------------- conversations (rail) --- */
+
+/* The sidebar's first job is "which conversation", so New chat sits above the
+   list and reads as an action, not a row of it. */
+.chats { padding: 0 0 14px; border-bottom: 1px solid var(--line-soft); margin-bottom: 14px; }
+.newchat {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  background: transparent; border: 1px solid var(--line); color: var(--ink);
+  border-radius: var(--r-sm); padding: 9px 11px; margin-bottom: 10px;
+  font-size: var(--t-sm); font-weight: 550; cursor: pointer; text-align: left;
+  transition: background-color .12s ease, border-color .12s ease;
+}
+.newchat:hover { background: var(--accent-soft); border-color: var(--ink-faint); }
+.newchat-ico { color: var(--ink-faint); }
+
+.threads { display: flex; flex-direction: column; gap: 1px; }
+.thread-row {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  background: transparent; border: 0; color: var(--ink-dim);
+  border-radius: var(--r-sm); padding: 7px 9px;
+  font-size: var(--t-sm); cursor: pointer; text-align: left;
+  transition: background-color .12s ease, color .12s ease;
+}
+.thread-row:hover { background: var(--accent-soft); color: var(--ink); }
+.thread-row.on { background: var(--accent-soft); color: var(--ink); }
+/* One line, always: a wrapping title turns an even list into a ragged one. */
+.thread-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.thread-del {
+  flex: 0 0 auto; background: transparent; border: 0; cursor: pointer;
+  color: var(--ink-faint); font-size: var(--t-meta); padding: 2px 4px;
+  border-radius: var(--r-xs); opacity: 0;
+}
+.thread-row:hover .thread-del { opacity: 1; }
+.thread-del:hover { color: var(--bad); background: var(--bad-soft); }
+
+/* ---------------------------------------------------- conversation log --- */
+
+.thread-log { display: flex; flex-direction: column; gap: 14px; padding: 4px 0 8px; }
+.turn { display: flex; }
+.turn.user { justify-content: flex-end; }
+.turn-text {
+  max-width: 78%; padding: 10px 14px; border-radius: var(--r-md);
+  font-size: var(--t-base); line-height: var(--lh-read); white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* What you said is a pill; what the agent said is the page. Giving both a
+   bubble makes the agent's answer look like one more message in a log, when it
+   is the result the whole run exists to produce. */
+.turn.user .turn-text { background: var(--panel-2); color: var(--ink); border: 1px solid var(--line); }
+.turn.assistant .turn-text { max-width: 100%; padding: 0; color: var(--ink); }
+
+.rail-btn {
+  background: transparent; border: 1px solid var(--line); color: var(--ink-dim);
+  border-radius: var(--r-sm); width: 30px; height: 30px; cursor: pointer;
+  font-size: var(--t-sm); flex: 0 0 auto; margin-right: 4px;
+}
+.rail-btn:hover { color: var(--ink); background: var(--accent-soft); }
+
+/* The models block folds away so conversations own the rail. */
+.rail-models > .rail-head { display: none; }
+.rail-sum {
+  list-style: none; cursor: pointer; padding: 7px 9px; border-radius: var(--r-sm);
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: .1em;
+  color: var(--ink-faint); user-select: none;
+}
+.rail-sum::-webkit-details-marker { display: none; }
+.rail-sum::before { content: "\203A "; display: inline-block; transition: transform .12s ease; }
+.rail-models[open] .rail-sum::before { transform: rotate(90deg); }
+.rail-sum:hover { color: var(--ink-dim); background: var(--accent-soft); }
