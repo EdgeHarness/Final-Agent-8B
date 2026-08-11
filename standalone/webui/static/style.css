@@ -168,10 +168,25 @@ button, input, textarea, select { font-family: inherit; color: inherit; }
 }
 /* The wordmark used to inherit the 16px body default, an unplanned fifth size
    outside the scale. Pinned to --t-base and carried by weight instead. */
-.mark { display: flex; align-items: center; gap: 9px; font-size: var(--t-base); }
-.mark-icon { display: flex; color: var(--ink); flex: 0 0 auto; }
-.mark-word { font-weight: 600; letter-spacing: -.01em; }
-.mark-sub { color: var(--ink-faint); font-weight: 400; font-size: var(--t-sm); }
+.mark { display: flex; align-items: center; gap: 11px; font-size: var(--t-base); }
+/* The logo is white-on-transparent art, so it is used as a mask and painted
+   with the theme's ink rather than dropped in as an <img>. An <img> would stay
+   white and disappear on the light theme; this way one asset serves both.
+   The aspect ratio comes from the file (1214x352), so the height is the only
+   number here and the width follows. */
+.logo {
+  display: block; height: 21px; width: calc(21px * 1214 / 352);
+  background-color: var(--ink);
+  -webkit-mask: url("/static/logo.png") no-repeat center / contain;
+  mask: url("/static/logo.png") no-repeat center / contain;
+  flex: 0 0 auto;
+}
+/* A rule, not just a gap: the strapline is separate from the logo and should
+   not read as part of the lockup. */
+.mark-sub {
+  color: var(--ink-faint); font-weight: 400; font-size: var(--t-sm);
+  padding-left: 11px; border-left: 1px solid var(--line);
+}
 /* The strapline is the first thing to go when the bar gets tight: the mark and
    the name identify the product, the description only elaborates. */
 @media (max-width: 860px) { .mark-sub { display: none; } }
@@ -706,15 +721,25 @@ button.ghost:hover, a.ghost:hover { color: var(--ink); }
 .ev.made::before { background: var(--good); border-color: var(--good); }
 .ev.bad::before { background: var(--bad); border-color: var(--bad); }
 
-.empty { text-align: center; padding: 48px 20px; }
-.empty-art { font-size: 34px; color: var(--line); margin-bottom: 10px; }
-.empty h3 { font-size: var(--t-lg); color: var(--ink-dim); font-weight: 500; }
-.empty p { max-width: 420px; margin: 8px auto 0; font-size: var(--t-sm);
-  line-height: var(--lh-read); color: var(--ink-faint); }
-/* The lead says what the product is and the line under it says what to do, so
-   they should not read as one undifferentiated paragraph of grey. */
-.empty p.empty-lead {
-  color: var(--ink-dim); font-size: var(--t-base); margin-top: 10px;
+/* Centred in the pane rather than pinned under the top edge. 100% here is the
+   feed's content box, which already excludes the bottom padding that clears
+   the floating dock, so subtracting the dock height again pushed the block
+   82px high. */
+.empty {
+  text-align: center; padding: 20px;
+  min-height: 100%;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+.empty-mark {
+  display: block; width: 60px; height: 60px; margin-bottom: 18px;
+  background-color: var(--ink-dim);
+  -webkit-mask: url("/static/mark.png") no-repeat center / contain;
+  mask: url("/static/mark.png") no-repeat center / contain;
+}
+.empty h3 { font-size: var(--t-lg); color: var(--ink); font-weight: 500; letter-spacing: -.015em; }
+.empty p {
+  max-width: 440px; margin: 10px auto 0; font-size: var(--t-sm);
+  line-height: var(--lh-read); color: var(--ink-faint);
 }
 
 /* the run banner: one row of facts, not a card competing with the end card */
