@@ -77,31 +77,71 @@ class TestNormalize(unittest.TestCase):
 
 # ------------------------------------------------------------- weekday check ---
 
-class TestWeekdayCheck(unittest.TestCase):
+class TestTaskDateCheck(unittest.TestCase):
+    """Began as a weekday-only check and was generalized: the failure - the
+    model resolves a task's date expression itself and gets it wrong, and every
+    tool answers honestly for the wrong day - is identical for "wednesday",
+    "tomorrow", "July 23" and "7/23"."""
+
     MON = datetime.date(2026, 7, 20)
 
     def check(self, task, args):
-        return agent.weekday_mismatch(task, args, self.MON)
+        return agent.task_date_mismatch(task, args, self.MON)
 
-    def test_a_date_on_the_wrong_weekday_is_caught_and_corrected(self):
+    # -- extraction --------------------------------------------------------
+    def test_the_expressions_the_normalizer_understands_are_all_found(self):
+        # "next tuesday" from a Monday is tomorrow under the normalizer's rule
+        # (delta % 7, with "or 7" only when that lands on today). The check MUST
+        # agree with the normalizer, whatever the rule is - agreeing is the point.
+        self.assertEqual(agent.task_dates("meet next tuesday", self.MON), {"2026-07-21"})
+        self.assertEqual(agent.task_dates("do it tomorrow", self.MON), {"2026-07-21"})
+        self.assertEqual(agent.task_dates("due July 23", self.MON), {"2026-07-23"})
+        self.assertEqual(agent.task_dates("due 7/23", self.MON), {"2026-07-23"})
+        self.assertEqual(agent.task_dates("on 2026-07-24 exactly", self.MON), {"2026-07-24"})
+
+    def test_a_bare_month_or_plain_number_is_not_a_date(self):
+        self.assertEqual(agent.task_dates("build my July receipts sheet", self.MON), set())
+        self.assertEqual(agent.task_dates("the Q3 numbers, all 3 regions", self.MON), set())
+
+    # -- the check ---------------------------------------------------------
+    def test_a_wrong_weekday_is_caught_and_corrected(self):
         msg = self.check("Summarize my Wednesday meetings", {"date": "2026-07-27"})
         self.assertIsNotNone(msg)
-        self.assertIn("Monday", msg)      # what it sent
         self.assertIn("2026-07-22", msg)  # what Wednesday actually is
+        self.assertIn("Monday", msg)      # what it sent
 
-    def test_the_right_weekday_passes(self):
+    def test_a_wrong_tomorrow_is_caught(self):
+        msg = self.check("Book dentist for tomorrow", {"date": "2026-07-20"})
+        self.assertIsNotNone(msg)
+        self.assertIn("2026-07-21", msg)
+
+    def test_a_wrong_month_day_is_caught(self):
+        msg = self.check("Set a reminder for July 23", {"date": "2026-07-24"})
+        self.assertIsNotNone(msg)
+        self.assertIn("2026-07-23", msg)
+
+    def test_the_right_date_passes_in_every_form(self):
         self.assertIsNone(self.check("Summarize my Wednesday meetings",
                                      {"date": "2026-07-22"}))
+        self.assertIsNone(self.check("Book dentist for tomorrow", {"date": "2026-07-21"}))
+        self.assertIsNone(self.check("reminder for 7/23", {"date": "2026-07-23"}))
 
     def test_plurals_count_as_naming_the_day(self):
         self.assertIsNotNone(self.check("never book me on Fridays", {"date": "2026-07-22"}))
 
-    def test_two_weekdays_in_one_task_are_left_alone(self):
+    def test_two_dates_in_one_task_are_left_alone(self):
         """"Move my Wednesday meeting to Friday" legitimately carries either."""
         self.assertIsNone(self.check("Move my Wednesday meeting to Friday",
                                      {"date": "2026-07-24"}))
+        self.assertIsNone(self.check("move the July 23 review to tomorrow",
+                                     {"date": "2026-07-21"}))
 
-    def test_a_task_naming_no_weekday_is_left_alone(self):
+    def test_the_same_date_named_two_ways_still_counts_as_one(self):
+        """"tomorrow, the 21st..." resolves to one date, so the check stays armed."""
+        msg = self.check("book it tomorrow, 7/21", {"date": "2026-07-24"})
+        self.assertIsNotNone(msg)
+
+    def test_a_task_naming_no_date_is_left_alone(self):
         self.assertIsNone(self.check("Book an hour for deep work", {"date": "2026-07-27"}))
 
     def test_a_call_with_no_date_is_left_alone(self):

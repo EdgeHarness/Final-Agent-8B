@@ -176,38 +176,77 @@ def normalize_args(name, args):
     return out
 
 
-def weekday_mismatch(task_text, args, today=None):
-    """The task names one weekday and the call carries a date that is not it.
+def task_dates(task_text, today=None):
+    """Every date expression the task itself names, resolved to ISO dates.
 
-    normalize_date turns "wednesday" into the right date, but it returns
-    immediately when the model has already written a well-formed YYYY-MM-DD -
-    so a model that does the arithmetic itself and gets it wrong sails straight
-    through. Observed live: the task said Wednesday, the 8B sent 2026-07-27
-    (a Monday), list_events answered honestly for that date, and the agent told
-    a colleague their Wednesday was clear.
+    Reuses the same normalizer the harness applies to arguments, so the two
+    always agree on what "next tuesday" means. Matches the expression kinds
+    normalize_date can resolve: weekday names (with optional "next", plural s),
+    today/tomorrow, "July 23", "7/23", and literal YYYY-MM-DD. A bare month
+    with no day number is not a date and does not match.
+    """
+    today = today or SIM_TODAY
+    text = str(task_text).lower()
+    found = set()
+    patterns = [
+        r"\b(?:next\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)s?\b",
+        r"\btoday\b|\btomorrow\b",
+        r"\b(?:january|february|march|april|may|june|july|august|september|october"
+        r"|november|december)\.?\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s*\d{4})?\b",
+        r"\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b",
+        r"\b\d{4}-\d{2}-\d{2}\b",
+    ]
+    for pat in patterns:
+        for m in re.finditer(pat, text):
+            expr = m.group(0).rstrip("s") if re.match(patterns[0], m.group(0)) else m.group(0)
+            resolved = normalize_date(expr, today)
+            if isinstance(resolved, str) and re.match(r"^\d{4}-\d{2}-\d{2}$", resolved):
+                found.add(resolved)
+    return found
 
-    Returns a correction to hand back, or None. Deliberately narrow: only when
-    the task names exactly ONE weekday, so "move my Wednesday meeting to Friday"
+
+def _describe(iso, today):
+    d = datetime.date.fromisoformat(iso)
+    return f"{iso} (a {_WEEKDAYS[d.weekday()].capitalize()})"
+
+
+def task_date_mismatch(task_text, args, today=None):
+    """The task names exactly one date and the call carries a different one.
+
+    normalize_date fixes "wednesday" but returns immediately when the model has
+    already written a well-formed YYYY-MM-DD - so a model that does the
+    arithmetic itself and gets it wrong sails straight through. Observed live:
+    the task said Wednesday, the 8B sent 2026-07-27 (a Monday), every tool
+    answered honestly for the wrong day, and the agent told a colleague their
+    Wednesday was clear.
+
+    This began as a weekday-only check; it now covers every date expression the
+    normalizer understands, because the failure is the same whatever form the
+    task used: "tomorrow", "July 23" and "7/23" can all be mis-resolved by the
+    model with no tool ever noticing.
+
+    Deliberately conservative in the same way as before: only when the task
+    names exactly ONE distinct date, so "move my Wednesday meeting to Friday"
     is left alone. The harness never rewrites the date - it says what is wrong
     and what the right one is, the same way it handles a bad parameter.
     """
     today = today or SIM_TODAY
-    named = [w for w in _WEEKDAYS if re.search(rf"\b{w}s?\b", str(task_text).lower())]
-    if len(set(named)) != 1:
-        return None
-    want = named[0]
     value = (args or {}).get("date")
     if not isinstance(value, str) or not re.match(r"^\d{4}-\d{2}-\d{2}$", value.strip()):
         return None
+    named = task_dates(task_text, today)
+    if len(named) != 1:
+        return None
+    want = next(iter(named))
+    got = value.strip()
     try:
-        got = datetime.date.fromisoformat(value.strip())
+        datetime.date.fromisoformat(got)
     except ValueError:
         return None
-    if _WEEKDAYS[got.weekday()] == want:
+    if got == want:
         return None
-    return (f"{value} is a {_WEEKDAYS[got.weekday()].capitalize()}, but the task says "
-            f"{want.capitalize()}. The {want.capitalize()} the task means is "
-            f"{normalize_date(want, today)}.")
+    return (f"The call uses {_describe(got, today)}, but the task means "
+            f"{_describe(want, today)}. Use {want} unless a tool result says otherwise.")
 
 
 def repair_args(name, args):
@@ -491,7 +530,7 @@ def run_harness(llm, world, mem, task_text):
         args = normalize_args(name, args)
 
         problems = validate_call(name, args)
-        wrong_day = weekday_mismatch(task_text, args) if not problems else None
+        wrong_day = task_date_mismatch(task_text, args) if not problems else None
         if wrong_day:
             ep.invalid_calls += 1
             give_feedback("WRONG DATE: " + wrong_day + " Reply with one corrected JSON object.",
