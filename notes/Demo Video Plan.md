@@ -322,20 +322,41 @@ newest email so it renders at the top of the inbox panel.
 
 The task typed on camera:
 
-> Read Dana's newest email and do what she asks
+> Read Dana's newest email, open the spreadsheet she mentions, and produce both
+> of the things she asks for
 
-Shorter than the take 5 task on purpose. "build the spreadsheet and the deck"
-told the agent the answer; this version makes it derive both from the mail,
-which is what the video claims it does.
+Every word of that was earned by measurement, not taste. "Read Dana's newest
+email and do what she asks" is the version that reads best and it fails: over
+five runs it produced the artifacts twice, and three times the agent sent an
+email claiming it had done the work. Naming the spreadsheet took opening the
+attachment from unreliable to 7 runs out of 7. Adding "both of the things" took
+the deck from 1 run in 7 to 3 out of 3 — an 8B stops at the first deliverable
+unless the count is in front of it.
 
-Expected output, three artifacts:
+What it still does NOT say is which tools to call or what the two things are.
+The agent gets those from the mail, which is the claim the video makes.
 
-- `q3_numbers.xlsx` — Region/Amount, the three Q3 figures, Total `=SUM(B2:B4)`
-- `q3_review.pptx` — a short deck off the same numbers
-- a reminder on Thursday to send it round
+Expected output, two artifacts:
 
-Re-measure the call count and wall time on the day; the take 5 figures (7 calls,
-10.7s) are for the old, easier fixture and will be low for this one.
+- an .xlsx carrying the four regions with the source numbers exactly, plus a
+  total column or row (the filename varies run to run: q3.xlsx, q3_clean.xlsx,
+  q3_numbers.xlsx have all appeared)
+- a .pptx off the same numbers
+
+Measured on the fixture: 7 to 10 calls, 15 to 21 seconds against the shim.
+Slower on real local ollama.
+
+**Verified across every run since the task text settled:** the generated sheet
+carries 1,105,000 / 802,000 / 415,000 / 498,000 and 1,240,000 / 845,000 /
+392,000 / 610,000, matching q3_raw.xlsx exactly. Nothing invented. That is the
+claim beat 5 and beat 8 rest on, and it is the one to re-check before shooting,
+because it is the one that would be a lie if it broke.
+
+**Known rough edge, do not hold on it:** the Total column is sometimes correct
+(`=SUM(B2:C2)` per row) and sometimes nonsense (`=B2+B3`, summing across two
+different regions). Both are real formulas in a real file, so the earlier plan's
+"hold longest on the formula" advice now needs a check in playback: if the take
+has the wrong formula, hold on the four regional figures instead.
 
 ## 6. Known risks on the day
 

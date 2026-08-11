@@ -550,6 +550,37 @@ class TestVerifier(unittest.TestCase):
                                 self.world, "t")
             self.assertEqual(out["unrequested"], want)
 
+    def test_a_read_that_carries_the_requirements_is_not_truncated_away(self):
+        """On an indirect task ("do what the email asks") the requirements live
+        in a read's RESULT, and the 200-char cap cut them off mid-sentence.
+        Measured: Dana's 248-char email was clipped four words before "and turn
+        the same numbers into a short deck", so the verifier accepted runs with
+        no deck and flagged the spreadsheet it did build as unrequested. A write
+        result is an echo of arguments the model already chose; a read result is
+        the only place new information enters, so it gets the room."""
+        self.world.emails.insert(0, {
+            "id": "e99", "from": "dana@corp.com", "date": "2026-07-20 08:40",
+            "subject": "two things",
+            "body": "Filler. " * 30 + "and second, turn them into a short deck."})
+        execute("read_email", {"id": "e99"}, self.world, None)
+        execute("create_spreadsheet", {"filename": "q.xlsx",
+                                       "rows": [["x" * 400], ["y"]]}, self.world, None)
+        llm = _StubLLM()
+        agent._verify(llm, self.world, "do what the newest email asks")
+        prompt = llm.seen[0][-1]["content"]
+        self.assertIn("short deck", prompt)          # the read survives
+        self.assertNotIn("x" * 300, prompt)          # the write is still capped
+
+    def test_the_verifier_is_told_where_a_delegated_task_keeps_its_requirements(self):
+        """"Judge ONLY the requirements stated in the task" is right for a task
+        that states them, and useless for one that delegates them. Measured: with
+        the email fully visible in the evidence, the verifier still passed runs
+        that built no deck, and still called the spreadsheet unrequested, because
+        it had been told not to look past the task sentence."""
+        llm = _StubLLM()
+        agent._verify(llm, self.world, "do what the newest email asks")
+        self.assertIn("DELEGATES", llm.seen[0][0]["content"])
+
     def test_reads_are_never_reported_as_unrequested(self):
         """The system prompt says reading is never unrequested; the 8B says it
         anyway. Observed live: "list_emails, read_spreadsheet" on a run whose

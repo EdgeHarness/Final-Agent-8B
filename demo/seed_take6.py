@@ -28,8 +28,7 @@ BODY = (
     "Morning! Final Q3 landed. I dropped the export in q3_raw.xlsx, it has Q2 "
     "and Q3 side by side.\n\n"
     "Could you pull the Q3 column into a clean spreadsheet with a total row, "
-    "and turn the same numbers into a short deck for Wednesday's review? "
-    "Remind me Thursday to send it round.\n\n"
+    "and turn the same numbers into a short deck for Wednesday's review?\n\n"
     "Thanks, Dana"
 )
 

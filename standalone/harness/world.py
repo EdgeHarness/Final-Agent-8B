@@ -236,7 +236,14 @@ class World:
 
     # ---- bookkeeping ----
     def log(self, tool, args, ok, result_preview):
-        self.actions.append({"tool": tool, "args": args, "ok": ok, "result": str(result_preview)[:300]})
+        # 1000, not 300. This log is the verifier's only evidence, and on an
+        # indirect task ("do what the email asks") the requirements live inside
+        # a read's result. At 300 a 248-char email survived but a longer one
+        # would not, and raising the verifier's own cap could not recover what
+        # was already thrown away here. The verifier still applies its own,
+        # tighter cap to writes, whose results only echo the model's arguments.
+        self.actions.append({"tool": tool, "args": args, "ok": ok,
+                             "result": str(result_preview)[:1000]})
 
     def snapshot(self):
         state = {"emails": self.emails, "sent_emails": self.sent_emails,
