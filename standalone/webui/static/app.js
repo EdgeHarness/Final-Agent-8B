@@ -781,19 +781,51 @@ function details(label, text, cls) {
   return det;
 }
 
+/* The model speaks JSON, but its `thought` field is the only part a person
+   wants. Pulling the field out of a half-written object means the sentence can
+   stream as it is written, without the braces and quoting around it ever
+   reaching the screen. */
+const THOUGHT_RE = /"(?:thought|reasoning)"\s*:\s*"((?:[^"\\]|\\.)*)/;
+function liveThought(raw) {
+  const m = raw.match(THOUGHT_RE);
+  if (!m) return null;
+  // a fragment can end mid-escape, which is not parseable; drop the dangling
+  // backslash and let the next token complete it
+  const body = m[1].replace(/\\$/, '');
+  try { return JSON.parse('"' + body + '"'); }
+  catch (_) { return body.replace(/\\n/g, '\n').replace(/\\"/g, '"'); }
+}
+
 function onCallStart(e) {
   const n = push('');
-  const stream = el('pre', 'stream');
-  n.append(stream);
-  S.call = { node: n, stream, text: '' };
+  // Until a thought appears there is nothing worth reading, so the row says it
+  // is working rather than showing an object being assembled.
+  const body = el('div', 'thinking', 'Thinking');
+  n.append(body);
+  S.call = { node: n, body, text: '' };
   meters(e.call, e.budget);
 }
 
 function onToken(e) {
   if (!S.call) return;
   S.call.text += e.text;
-  S.call.stream.textContent = S.call.text;
+  const t = liveThought(S.call.text);
+  if (t) {
+    S.call.body.className = 'think';
+    S.call.body.textContent = t;
+  }
   autoscroll();
+}
+
+/* Every path that ends a call has to land the row in a readable state, or it
+   shimmers "Thinking" forever. This is the one place that does it. */
+function settleCall(text, raw) {
+  if (!S.call) return;
+  S.call.body.className = text ? 'think' : 'think quiet';
+  S.call.body.textContent = text || 'no reasoning given';
+  if (raw) S.call.node.append(details('raw reply', raw));
+  S.call.node.classList.add('settled');
+  S.call = null;
 }
 
 function onCallEnd(e) {
@@ -804,20 +836,15 @@ function onCallEnd(e) {
   }
 }
 
-/* The raw stream is the model thinking out loud; once the harness has parsed
-   it, the thought is what matters and the JSON is evidence. Swap one for the
-   other in place rather than adding a second row saying the same thing. */
+/* The parsed thought replaces the streamed one. They are usually identical, but
+   the streamed version came out of a half-written object and the parsed one is
+   authoritative. The JSON stays reachable as evidence, collapsed. */
 function onModelReply(content) {
   if (!S.call) return;
   let obj = null;
   try { obj = JSON.parse(content); } catch (_) { /* the harness will repair it */ }
   const thought = obj && (obj.thought || obj.reasoning);
-  S.call.stream.remove();
-  if (thought) S.call.node.prepend(el('div', 'think', String(thought)));
-  else if (!obj) S.call.node.prepend(el('div', 'think quiet', 'reply was not valid JSON'));
-  S.call.node.append(details('raw reply', content));
-  S.call.node.classList.add('settled');
-  S.call = null;
+  settleCall(thought ? String(thought) : (obj ? '' : 'reply was not valid JSON'), content);
 }
 
 let doneSummary = null;
@@ -829,7 +856,16 @@ function onNote(e) {
     return;
   }
   if (k === 'task' || k === 'observation') return;   // shown by the banner / tool row
-  if (k === 'plan') return drawPlan(e.content);
+  /* The plan call has to settle its row too. It did not, so the row that
+     produced the plan kept whatever the model had streamed into it: a raw
+     {"steps": [...]} object sitting at the top of every run forever. The plan
+     strip already shows the steps, so the row only reports that it planned. */
+  if (k === 'plan') {
+    drawPlan(e.content);
+    const n = planSteps.length;
+    settleCall(`Planned ${n} step${n === 1 ? '' : 's'}.`, e.content);
+    return;
+  }
   if (k === 'model') return onModelReply(e.content);
 
   if (k === 'repair') {
@@ -923,6 +959,8 @@ function onConfirm(e) {
 function onEnd(e) {
   stopClock();
   endPlan();
+  // a call still open at the end would shimmer "Thinking" on a finished run
+  settleCall('', S.call ? S.call.text : '');
   const n = push(e.finished ? 'made' : 'bad');
   const card = el('div', 'endcard' + (e.finished ? '' : ' cut'));
 
@@ -960,19 +998,27 @@ function onEnd(e) {
     d.append(el('b', null, String(v)), el('span', null, l));
     return d;
   };
+  const plural = (nn, word) => `${word}${nn === 1 ? '' : 's'}`;
   /* calls first, flagged red when they are what stopped the run, because the
      stat that ended the run should be the one the eye lands on */
   stats.append(stat(`${e.calls}/${e.budget}`, 'model calls', !e.finished),
                stat(e.output_tokens, 'tokens out'),
                stat(`${e.wall}s`, 'model time'),
-               stat(e.actions.length, 'actions'));
-  if (e.tool_errors) stats.append(stat(e.tool_errors, 'tool errors', true));
-  if (e.parse_failures + e.invalid_calls) {
-    stats.append(stat(e.parse_failures + e.invalid_calls, 'bad replies', true));
+               stat(e.actions.length, plural(e.actions.length, 'action')));
+  if (e.tool_errors) {
+    stats.append(stat(e.tool_errors, plural(e.tool_errors, 'tool error'), true));
   }
+  const badReplies = e.parse_failures + e.invalid_calls;
+  if (badReplies) stats.append(stat(badReplies, plural(badReplies, 'bad reply'), true));
   card.append(stats);
 
-  if (e.log) card.append(el('div', 'endlabel', `transcript saved to ${e.log}`));
+  /* Its own class, not .endlabel: that one uppercases, which turned a
+     case-sensitive path into AGENTS/8B/LOGS/RUN_003.JSON. */
+  if (e.log) {
+    const f = el('div', 'endfoot');
+    f.append(el('span', null, 'Transcript'), el('code', null, e.log));
+    card.append(f);
+  }
   n.append(card);
 }
 

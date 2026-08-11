@@ -531,6 +531,25 @@ button.ghost:hover, a.ghost:hover { color: var(--ink); }
 .knob.on { color: var(--ink-dim); border-color: var(--line); }
 .knob.off { color: var(--ink-faint); text-decoration: line-through; opacity: .7; }
 
+/* Before the model has written anything worth reading, the row says it is
+   working. A sweep of lighter ink travels across the word, which reads as
+   activity without a spinner and without the raw object being assembled on
+   screen. Two stops of the gradient are the text colour, so it degrades to
+   plain text anywhere background-clip is unsupported. */
+.thinking {
+  font-size: var(--t-base); line-height: var(--lh-read); color: var(--ink-faint);
+  background-image: linear-gradient(100deg,
+    var(--ink-faint) 30%, var(--ink) 50%, var(--ink-faint) 70%);
+  background-size: 220% 100%;
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer 1.5s linear infinite;
+}
+@keyframes shimmer {
+  from { background-position: 180% 0; }
+  to { background-position: -80% 0; }
+}
+
 /* live reasoning is the loud one; once it has settled it steps back a size */
 .think { font-size: var(--t-base); line-height: var(--lh-read); }
 .settled .think { font-size: var(--t-sm); color: var(--ink-dim); }
@@ -623,14 +642,36 @@ pre.raw {
 .endfile .nm { font-family: var(--mono); }
 .endfile .add { margin-left: auto; color: var(--good); font-size: var(--t-meta);
   font-variant-numeric: tabular-nums; }
+/* A measured row, not a wrapped pile: equal columns so the figures line up on
+   a grid instead of sitting at whatever x their label happened to leave them.
+   auto-fit keeps them even at any pane width, and the numbers are tabular so
+   the columns hold still. */
 .endstats {
-  display: flex; flex-wrap: wrap; gap: 18px; margin-top: 13px;
-  padding-top: 11px; border-top: 1px solid var(--line-soft);
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
+  gap: 14px 10px; margin-top: 14px; padding-top: 12px;
+  border-top: 1px solid var(--line-soft);
 }
-.endstats b { display: block; font-size: var(--t-base); font-weight: 600;
-  font-variant-numeric: tabular-nums; }
-.endstats span { font-size: var(--t-meta); color: var(--ink-faint); }
+/* --t-lg, the scale's top step: these figures are the headline of the card,
+   and a bespoke 17px would be a fifth size chosen to feel right rather than
+   picked off the ladder. */
+.endstats b {
+  display: block; font-size: var(--t-lg); font-weight: 600; letter-spacing: -.02em;
+  font-variant-numeric: tabular-nums; line-height: 1.2;
+}
+.endstats span {
+  display: block; font-size: var(--t-meta); color: var(--ink-faint); margin-top: 2px;
+}
 .endstats .bad-stat b { color: var(--bad); }
+
+/* The transcript path used to run through .endlabel, which uppercases, so a
+   case-sensitive path rendered as AGENTS/8B/LOGS/RUN_003.JSON. It is a path:
+   it gets mono, its own case, and room to wrap. */
+.endfoot {
+  display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap;
+  margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line-soft);
+  font-size: var(--t-meta); color: var(--ink-faint);
+}
+.endfoot code { font-family: var(--mono); color: var(--ink-dim); word-break: break-all; }
 
 /* ------------------------------------------------- right: the artifacts --- */
 /* Named .artifacts, not .out: `.out` is already the tool status span inside
@@ -682,6 +723,12 @@ pre.raw {
   .tab.new, .chip.fresh { animation: none; background: var(--good-soft); }
   .ev { animation: none; }
   .feed { scroll-behavior: auto; }
+  /* the shimmer is the only cue that a call is in flight, so it degrades to a
+     static state rather than disappearing */
+  .thinking {
+    animation: none; background-image: none;
+    -webkit-text-fill-color: currentColor; color: var(--ink-dim);
+  }
 }
 /* ref 2: Codex keeps its top-level tabs visible whether or not they have
    content. Ours used to appear only as files landed, so early in a run the
