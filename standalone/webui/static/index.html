@@ -10,19 +10,29 @@
 <body>
 
 <header class="topbar">
-  <div class="brand">
-    <span class="logo">◆</span>
-    <div>
-      <h1>Agent Lab</h1>
-      <p>on-device agents · one model at a time · nothing leaves this machine</p>
-    </div>
-  </div>
+  <div class="mark">Agent Lab<span>on-device · nothing leaves this machine</span></div>
+  <!-- Meters read value-first. "calls 4/20" makes the eye parse a label before
+       it reaches the number it came for; the figure leads and the label sits
+       under it. Tabular figures so the row does not twitch as digits change. -->
   <div class="meters" id="meters">
-    <div class="meter" id="meter-ollama"><span class="dot"></span><span class="label">checking ollama…</span></div>
-    <div class="meter hidden" id="meter-calls"><span class="label">calls</span><b id="calls-val">0/14</b>
-      <div class="bar"><i id="calls-bar"></i></div></div>
-    <div class="meter hidden" id="meter-time"><span class="label">elapsed</span><b id="time-val">0s</b></div>
-    <div class="meter hidden" id="meter-tok"><span class="label">tokens out</span><b id="tok-val">0</b></div>
+    <div class="meter dotmeter" id="meter-ollama">
+      <span class="dot"></span><span class="label">checking ollama…</span>
+    </div>
+    <div class="meter hidden" id="meter-calls">
+      <b id="calls-val">0/14</b><span>calls</span>
+      <div class="bar"><i id="calls-bar"></i></div>
+    </div>
+    <div class="meter hidden" id="meter-time"><b id="time-val">0s</b><span>elapsed</span></div>
+    <div class="meter hidden" id="meter-tok"><b id="tok-val">0</b><span>tokens</span></div>
+    <button class="theme" id="theme" type="button" aria-label="Switch theme">
+      <!-- One drawn mark, not a sun/moon pair: a half-filled disc reads as
+           contrast in either state, so nothing has to decide whether the icon
+           shows the current theme or the target. -->
+      <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+        <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <path d="M8 2a6 6 0 0 0 0 12z" fill="currentColor"/>
+      </svg>
+    </button>
   </div>
 </header>
 
@@ -54,45 +64,85 @@
     </details>
   </aside>
 
-  <!-- ------------------------------------------------------------- stage -->
-  <main class="stage">
-    <section class="composer">
-      <textarea id="task" rows="2" placeholder="Tell the agent what to do…"></textarea>
-      <div class="composer-actions">
-        <select id="model" class="model-pick"
-                title="Which installed model actually drives this agent"></select>
-        <button id="run" class="primary" disabled>Run</button>
-        <button id="stop" class="ghost hidden">Stop</button>
+  <!-- The run on the left, what it produced on the right, permanently. The
+       deck appears the moment it is written, at size, with no click. -->
+  <div class="body">
+
+    <!-- --------------------------------------------------------- the run -->
+    <section class="run">
+      <div class="composer">
+        <textarea id="task" rows="2" placeholder="Tell the agent what to do…"></textarea>
+        <div class="composer-actions">
+          <select id="model" class="model-pick"
+                  title="Which installed model actually drives this agent"></select>
+          <button id="run" class="primary" disabled>Run</button>
+          <button id="stop" class="ghost hidden">Stop</button>
+        </div>
+      </div>
+      <div id="presets" class="presets"></div>
+
+      <!-- The plan is the only forward-looking information in a run: it
+           answers how much longer. Each step lights as its tool fires, so it
+           is a progress bar built from state the runner already sends.
+           "Steps only" strips the reasoning down to what the agent did. -->
+      <div class="runbar">
+        <div class="plan" id="plan" aria-label="Planned steps"></div>
+        <button class="steps-toggle" id="steps-toggle" type="button" aria-pressed="false">
+          Steps only
+        </button>
+      </div>
+
+      <!-- tabindex=0 on the scroll containers: a scrollable region that cannot
+           be focused cannot be scrolled from the keyboard at all. -->
+      <div class="feed" tabindex="0" role="log" aria-label="Run timeline">
+        <div class="feed-in" id="timeline"></div>
+        <div id="empty" class="empty">
+          <div class="empty-art">◆</div>
+          <h3>Nothing running</h3>
+          <p>Choose a model on the left, pick or type a task, and press Run.
+             Every step — the plan, each token the model writes, every tool call
+             and its result — shows up here as it happens.</p>
+        </div>
       </div>
     </section>
-    <div id="presets" class="presets"></div>
 
-    <section class="timeline-wrap">
-      <div id="timeline" class="timeline"></div>
-      <div id="empty" class="empty">
-        <div class="empty-art">◆</div>
-        <h3>Nothing running</h3>
-        <p>Choose a model on the left, pick or type a task, and press Run.
-           Every step — the plan, each token the model writes, every tool call
-           and its result — shows up here as it happens.</p>
+    <div class="splitter" id="splitter" role="separator" aria-orientation="vertical"
+         tabindex="0" aria-label="Resize the run and artifact panes"
+         aria-valuemin="24" aria-valuemax="68" aria-valuenow="50"></div>
+
+    <!-- ------------------------------------------------- what it produced -->
+    <section class="artifacts">
+      <div class="tabs" id="tabs" role="tablist" aria-label="Artifacts"></div>
+      <div class="canvas" id="canvas" tabindex="0">
+        <div class="pane on" id="pane-all" role="tabpanel" aria-label="All artifacts">
+          <div class="holding" id="holding">
+            <div><b>Nothing written yet</b>
+              Files the agent creates appear here<br>as it creates them.</div>
+          </div>
+          <div class="grid-all hidden" id="grid-all"></div>
+        </div>
+        <div class="pane" id="pane-ws" role="tabpanel" aria-label="Workspace">
+          <div class="folder-head">
+            <div>
+              <h2>Workspace</h2>
+              <p id="folder-path" class="folder-path">—</p>
+            </div>
+            <div class="folder-btns">
+              <button id="reveal" class="icon-btn" title="Open this folder on disk">⤢</button>
+              <button id="reset" class="icon-btn" title="Factory-reset this agent">↺</button>
+            </div>
+          </div>
+          <div id="tree" class="tree"></div>
+        </div>
+      </div>
+      <!-- Scoped to the run, not the folder: a file the agent never opened is
+           not part of the story being told. -->
+      <div class="touched" id="touched">
+        <span class="lbl">this run touched</span>
+        <span class="none" id="touched-none">nothing yet</span>
       </div>
     </section>
-  </main>
-
-  <!-- ------------------------------------------------------------ folder -->
-  <aside class="folder">
-    <div class="folder-head">
-      <div>
-        <h2>Workspace</h2>
-        <p id="folder-path" class="folder-path">—</p>
-      </div>
-      <div class="folder-btns">
-        <button id="reveal" class="icon-btn" title="Open this folder on disk">⤢</button>
-        <button id="reset" class="icon-btn" title="Factory-reset this agent">↺</button>
-      </div>
-    </div>
-    <div id="tree" class="tree"></div>
-  </aside>
+  </div>
 </div>
 
 <!-- ------------------------------------------------------------- viewer -->

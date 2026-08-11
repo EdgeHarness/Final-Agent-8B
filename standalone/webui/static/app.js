@@ -38,9 +38,25 @@ const TOOL_ICON = {
   delete_path: '🗑️', move_path: '↔️', search_files: '🔎', run_command: '⌨️',
 };
 
+/* A call that changes the world, rather than reading it. The dot on the
+   timeline is green for these and blue for a read, so the shape of a run is
+   legible before a word of it is read. */
+const MUTATORS = new Set([
+  'send_email', 'add_event', 'send_message', 'set_reminder', 'save_memory',
+  'create_presentation', 'create_spreadsheet',
+  'write_file', 'append_file', 'delete_path', 'move_path', 'run_command',
+]);
+
+/* Which argument names the file a tool produced. Office files land in the
+   agent's workspace, which is what /api/preview can read, so those get a real
+   preview pane. write_file and append_file go to the user's own folder: they
+   belong in the touched strip, but there is nothing to render for them. */
+const ARTIFACT_ARG = { create_presentation: 'filename', create_spreadsheet: 'filename' };
+const TOUCH_ARG = { ...ARTIFACT_ARG, write_file: 'path', append_file: 'path' };
+
 const S = {
   agents: [], agent: null, ws: null, run: null, es: null,
-  call: null, banner: null, t0: 0, timer: null, seen: {}, first: true,
+  call: null, t0: 0, timer: null, seen: {}, first: true,
   open: new Set(['files', 'inbox', 'calendar']),
 };
 
@@ -49,7 +65,7 @@ const S = {
 async function loadAgents(keep) {
   const data = await api('/api/agents');
   S.agents = data.agents;
-  $('meter-ollama').className = 'meter ' + (data.ollama ? 'up' : 'down');
+  $('meter-ollama').className = 'meter dotmeter ' + (data.ollama ? 'up' : 'down');
   $('meter-ollama').querySelector('.label').textContent =
     data.ollama ? 'ollama running' : 'ollama not running';
   renderPresets(data.presets);
@@ -103,8 +119,7 @@ function pullModel(a, row) {
   es.onmessage = (e) => {
     const m = JSON.parse(e.data);
     if (m.t === 'pull') {
-      const pct = m.total ? (m.completed / m.total) * 100 : 0;
-      fill.style.width = `${pct}%`;
+      fill.style.transform = `scaleX(${m.total ? m.completed / m.total : 0})`;
       row.textContent = `${m.status}${m.total ? ` — ${bytes(m.completed)} / ${bytes(m.total)}` : ''}`;
     } else if (m.t === 'error') {
       row.textContent = m.message;
@@ -405,6 +420,15 @@ function renderWorkbook(p) {
   return wrap;
 }
 
+/* One place that turns a preview payload into a node, so the full pane, the
+   thumbnail and the modal cannot drift apart. */
+function renderPreview(p) {
+  if (p.kind === 'pptx') return renderDeck(p);
+  if (p.kind === 'xlsx') return renderWorkbook(p);
+  if (p.kind === 'text') return el('div', 'plain', p.text);
+  return el('div', 'plain', `binary file, ${bytes(p.size)} — download to open it`);
+}
+
 async function openFile(name) {
   const url = `/api/download?agent=${S.agent}&name=${encodeURIComponent(name)}`;
   let p;
@@ -414,15 +438,7 @@ async function openFile(name) {
     return openViewer(name, el('div', 'plain', String(err.message)));
   }
   const box = el('div');
-  if (p.kind === 'pptx') {
-    box.append(renderDeck(p));
-  } else if (p.kind === 'xlsx') {
-    box.append(renderWorkbook(p));
-  } else if (p.kind === 'text') {
-    box.append(el('div', 'plain', p.text));
-  } else {
-    box.append(el('div', 'plain', `binary file, ${bytes(p.size)} — download to open it`));
-  }
+  box.append(renderPreview(p));
   openViewer(name, box, url);
 }
 
@@ -430,7 +446,7 @@ async function openLog(name) {
   const log = await api(`/api/log?agent=${S.agent}&name=${encodeURIComponent(name)}`);
   const box = el('div');
   box.append(el('div', 'mail-meta',
-    `${log.model || ''} · ${log.finished ? 'finished' : 'ran out of budget'}${log.summary ? ' · ' + log.summary : ''}`));
+    `${log.model || ''} · ${log.finished ? 'finished' : 'ran out of model calls'}${log.summary ? ' · ' + log.summary : ''}`));
   box.append(el('div', 'mail-body', log.task));
   const pre = el('pre', 'raw');
   pre.textContent = (log.transcript || [])
@@ -440,262 +456,528 @@ async function openLog(name) {
   openViewer(name, box);
 }
 
-/* ----------------------------------------------------------- the stage --- */
+/* ----------------------------------------------- the artifact pane ------ */
+/* The point of this layout: a file lands, it is on screen. No click, no modal,
+   at the size the thing is actually meant to be read at. */
 
-function addCard(cls) {
-  const c = el('div', 'card ' + (cls || ''));
-  $('timeline').append(c);
+/* The All and Workspace tabs exist before anything does. Codex keeps its
+   top-level tabs visible whether or not they have content, so the right side
+   always says what it is for instead of being an unexplained empty box. */
+const panes = {
+  all: { pane: $('pane-all'), tab: null },
+  ws: { pane: $('pane-ws'), tab: null },
+};
+const allCount = el('span', 'count', '0');
+
+function makeTab(label, cls, onSelect) {
+  const tab = el('button', 'tab' + (cls ? ' ' + cls : ''));
+  tab.type = 'button';
+  tab.setAttribute('role', 'tab');
+  tab.append(document.createTextNode(label));
+  tab.onclick = onSelect;
+  $('tabs').append(tab);
+  return tab;
+}
+
+/* A role=tablist promises arrow-key navigation and a roving tabindex: one stop
+   for the whole group, arrows to move within it. Every tab being tabindex 0
+   means Tab walks through all of them, which is the behaviour the role tells
+   screen reader users will not happen. */
+$('tabs').addEventListener('keydown', (ev) => {
+  const tabs = [...$('tabs').querySelectorAll('.tab')];
+  const i = tabs.indexOf(document.activeElement);
+  if (i < 0) return;
+  const to = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: tabs.length - 1 }[ev.key];
+  if (to === undefined) return;
+  ev.preventDefault();
+  const next = tabs[(to + tabs.length) % tabs.length];
+  next.focus();
+  next.click();
+});
+
+panes.all.tab = makeTab('All', null, () => select('all'));
+panes.all.tab.append(allCount);
+panes.ws.tab = makeTab('Workspace', null, () => select('ws'));
+
+function select(name) {
+  for (const [k, v] of Object.entries(panes)) {
+    const on = k === name;
+    v.pane.classList.toggle('on', on);
+    v.tab.classList.toggle('on', on);
+    v.tab.setAttribute('aria-selected', on ? 'true' : 'false');
+    // roving tabindex: the selected tab is the group's single tab stop
+    v.tab.tabIndex = on ? 0 : -1;
+  }
+}
+select('all');   // the All tab reads as selected from the first frame
+
+async function showArtifact(name, stat) {
+  if (panes[name]) {
+    // a rewrite: the caption has to follow, or the All view disagrees with the
+    // chip strip about what the agent just produced
+    if (panes[name].stat) panes[name].stat.textContent = stat || '';
+    return select(name);
+  }
+  let payload;
+  try {
+    payload = await api(`/api/preview?agent=${S.agent}&name=${encodeURIComponent(name)}`);
+  } catch (_) {
+    return;                    // the touched chip already records that it exists
+  }
+  if (panes[name]) return;     // two events for the same file raced here
+
+  $('holding').classList.add('hidden');
+  $('grid-all').classList.remove('hidden');
+
+  const pane = el('div', 'pane');
+  // the static panes are marked up as tabpanels; panes built at runtime were
+  // not, so most of the tablist pointed at nothing
+  pane.setAttribute('role', 'tabpanel');
+  pane.setAttribute('aria-label', name);
+  pane.style.padding = '22px 26px';
+  pane.append(renderPreview(payload));
+  $('canvas').append(pane);
+
+  const tab = makeTab(name, 'new', () => select(name));
+
+  /* The same renderers again, into a small box. They size themselves from
+     their container, so there is no separate thumbnail code path to keep in
+     sync with the real one. */
+  const thumb = el('button', 'thumb');
+  thumb.type = 'button';
+  const cap = el('div', 'cap');
+  const capStat = el('span', null, stat || '');
+  cap.append(el('b', null, name), capStat);
+  const shot = el('div', 'shot');
+  shot.append(renderPreview(payload));
+  thumb.append(cap, shot);
+  thumb.onclick = () => select(name);
+  $('grid-all').append(thumb);
+
+  panes[name] = { pane, tab, stat: capStat };
+  allCount.textContent = String(Object.keys(panes).length - 2);
+  select(name);
+  setTimeout(() => tab.classList.remove('new'), 950);
+}
+
+/* --- what this run touched --- */
+/* Scoped to the run, not the folder: a file the agent never opened is not part
+   of the story being told. Keyed by name, because an agent revising its own
+   deck writes the same file twice and a second chip for it is a lie about how
+   many things it made. */
+const touched = {};
+/* Every product that lists changed files caps the list. Ours appended without
+   a ceiling, so a long run would grow the strip until it pushed the canvas off
+   screen. Measured: at 1440 the strip fits 5 chips per row, at 1280 it fits 4.
+   8 is two rows, and the CSS bounds the strip to two rows independently so a
+   long filename can never push it to three. */
+const TOUCHED_MAX = 8;
+let overflowChip = null;
+
+function addTouched(name, stat) {
+  $('touched-none').classList.add('hidden');
+  let chip = touched[name];
+  if (!chip) {
+    if (Object.keys(touched).length >= TOUCHED_MAX) {
+      if (!overflowChip) {
+        overflowChip = el('span', 'more', '');
+        $('touched').append(overflowChip);
+      }
+      touched[name] = null;                       // counted, not drawn
+      overflowChip.textContent = `+${Object.keys(touched).length - TOUCHED_MAX} more`;
+      return;
+    }
+    chip = el('button', 'chip');
+    chip.type = 'button';
+    chip.append(el('span', 'nm', name), el('span', 'add', ''));
+    chip.onclick = () => panes[name] ? select(name) : openFile(name);
+    $('touched').append(chip);
+    touched[name] = chip;
+  }
+  if (!chip) return;                              // an overflowed file, rewritten
+  chip.querySelector('.add').textContent = stat || '';
+  chip.classList.remove('fresh');
+  void chip.offsetWidth;           // restart the animation on a rewrite
+  chip.classList.add('fresh');
+  setTimeout(() => chip.classList.remove('fresh'), 950);
+}
+
+/* The runner already tells us how big the thing it made is, so showing it here
+   beats leaving it buried in the arguments. */
+function statFor(e) {
+  const a = e.args || {};
+  if (Array.isArray(a.rows)) return `+${a.rows.length} rows`;
+  if (Array.isArray(a.slides)) return `+${a.slides.length} slides`;
+  return '';
+}
+
+/* ------------------------------------------------------- the timeline --- */
+
+const feed = $('timeline');
+function push(cls) {
+  const n = el('div', 'ev ' + (cls || ''));
+  feed.append(n);
   autoscroll();
-  return c;
-}
-function head(card, who, chips, meta) {
-  const h = el('div', 'card-head');
-  h.append(el('span', 'who', who));
-  (chips || []).forEach((c) => h.append(el('span', 'chip ' + (c.cls || ''), c.text)));
-  h.append(el('span', 'spacer'));
-  const m = el('span', 'meta', meta || '');
-  h.append(m);
-  card.append(h);
-  return m;
-}
-function autoscroll() {
-  const t = $('timeline');
-  if (t.scrollHeight - t.scrollTop - t.clientHeight < 220) t.scrollTop = t.scrollHeight;
+  return n;
 }
 
-function clearStage() {
-  $('timeline').textContent = '';
-  $('empty').classList.add('hidden');
-  S.call = null;
+/* Only auto-scroll when the viewport is already within 100px of the bottom.
+   Before this, every event yanked the pane down, so you could not read back
+   through a run while it was still going. Scroll up once and the feed leaves
+   you alone until you return to the bottom yourself. */
+const STICK_PX = 100;
+function autoscroll() {
+  const f = feed.parentElement;
+  if (f.scrollHeight - f.scrollTop - f.clientHeight <= STICK_PX) {
+    f.scrollTop = f.scrollHeight;
+  }
 }
+
+/* The clock stops when the run does. It used to be a bare setInterval that was
+   only cleared on finishRun, so a stream that ended without closing kept
+   counting: a screenshot twenty minutes later read "1270s" for an 11-second
+   run. A number that keeps moving after the thing it measures has stopped is
+   worse than no number. */
+const paintClock = () =>
+  $('time-val').textContent = `${Math.round((Date.now() - S.t0) / 1000)}s`;
+function startClock() {
+  stopClock();
+  S.t0 = Date.now();
+  paintClock();
+  S.timer = setInterval(paintClock, 250);
+}
+function stopClock() {
+  if (S.timer) { clearInterval(S.timer); S.timer = null; }
+  paintClock();                       // land on the true final value
+}
+
+function meters(c, budget) {
+  const box = $('meter-calls');
+  $('calls-val').textContent = `${c}/${budget}`;
+  const r = budget ? c / budget : 0;
+  $('calls-bar').style.transform = `scaleX(${r})`;
+  // classList, not className: assigning the whole string used to drop the
+  // layout classes the moment a run crossed a threshold
+  box.classList.toggle('warn', r > 0.7 && r <= 0.9);
+  box.classList.toggle('bad', r > 0.9);
+}
+
+/* Finding 7. The plan arrives once, as lines like "1. read_email - get the Q3
+   numbers". Only the tool name is kept: the prose after it repeats what the
+   timeline is about to say anyway, and this strip has to stay one or two rows
+   tall beside the Steps only button. */
+let planSteps = [];
+function drawPlan(content) {
+  /* Idempotent: clear before drawing. Appending meant a second plan event
+     duplicated the whole strip, and the harness can legitimately emit one
+     again after a failure. A step already spent must never reappear. */
+  $('plan').textContent = '';
+  planSteps = String(content).split('\n').filter(Boolean).map((line) => {
+    const m = line.match(/^\d+\.\s*(\S+)/);
+    const node = el('span', 'step', m ? m[1] : clip(line, 28));
+    node.title = line;
+    $('plan').append(node);
+    return { tool: m ? m[1] : null, node, done: false };
+  });
+  if (planSteps[0]) planSteps[0].node.classList.add('now');
+}
+function advancePlan(tool) {
+  const step = planSteps.find((s) => !s.done && s.tool === tool);
+  if (!step) return;                       // an unplanned call: leave the plan alone
+  step.done = true;
+  step.node.classList.remove('now');
+  step.node.classList.add('done');
+  const next = planSteps.find((s) => !s.done);
+  if (next) next.node.classList.add('now');
+}
+
+/* --- events ------------------------------------------------------------ */
 
 function onBanner(e) {
-  const card = addCard('banner');
-  head(card, e.name, [{ text: e.model, cls: 'role-driver' },
-                      { text: `${e.budget} call budget` },
-                      { text: e.toolset }]);
-  card.append(el('div', 'banner-title', e.task));
+  resetRun();
+  meters(0, e.budget);
+  const n = push('act');
+  n.append(el('div', 'banner-task', e.task));
+
+  const grid = el('div', 'banner-grid');
+  grid.append(el('span', 'chip-meta role-driver', e.model),
+              el('span', 'chip-meta', `${e.budget} model calls`),
+              el('span', 'chip-meta', e.toolset),
+              el('span', 'chip-meta', `today: ${e.today}`),
+              el('span', 'chip-meta', e.endpoint));
+  if (e.root) grid.append(el('span', 'chip-meta', `real folder: ${e.root}`));
+  if (e.yolo) grid.append(el('span', 'chip-meta', 'confirmations off'));
+  if (e.tiers) grid.append(el('span', 'chip-meta', `tiers: ${Object.values(e.tiers.roles).join(', ')}`));
+  n.append(grid);
 
   const p = e.profile;
   if (p) {
     const hz = el('div', 'harness-strip');
-    hz.append(el('span', 'harness-name', `⚙ ${p.label}`));
-    const knob = (on, label) => {
-      const s = el('span', 'knob' + (on ? ' on' : ' off'), label);
-      return s;
-    };
-    hz.append(knob(p.plan, p.plan ? `plan ≤${p.plan_max_steps}` : 'no plan'),
+    const knob = (on, label) => el('span', 'knob' + (on ? ' on' : ' off'), label);
+    hz.append(el('span', 'harness-name', `⚙ ${p.label}`),
+              knob(p.plan, p.plan ? `plan ≤${p.plan_max_steps}` : 'no plan'),
               knob(p.verify_rounds > 0, p.verify_rounds ? `verify ×${p.verify_rounds}` : 'no verify'),
               knob(p.loop_break, p.loop_break ? 'loop-break' : 'loops ok'),
               knob(true, `out ≤${p.num_predict}`),
               knob(true, `ctx ${(p.num_ctx / 1024).toFixed(0)}k`),
               knob(true, `think ≤${p.think_streak_cap}`),
               knob(true, `mem ${p.memory_k}`));
-    card.append(hz);
-    if (p.rationale) {
-      const det = el('details', 'harness-why');
-      det.append(el('summary', null, 'why this harness for this model'),
-                 el('div', 'note-text', p.rationale));
-      card.append(det);
-    }
+    n.append(hz);
+    if (p.rationale) n.append(details('why this harness for this model', p.rationale, 'note'));
   }
+  S.banner = n;
+}
 
-  const grid = el('div', 'banner-grid');
-  grid.append(el('span', 'chip', `today: ${e.today}`),
-              el('span', 'chip', e.endpoint));
-  if (e.root) grid.append(el('span', 'chip', `real folder: ${e.root}`));
-  if (e.yolo) grid.append(el('span', 'chip', 'confirmations off'));
-  if (e.tiers) grid.append(el('span', 'chip', `tiers: ${Object.values(e.tiers.roles).join(', ')}`));
-  card.append(grid);
-  S.banner = card;
-  $('calls-val').textContent = `0/${e.budget}`;
+/* A disclosure that keeps the long text out of the flow but never out of
+   reach. Two callers wanted the same thing with different bodies. */
+function details(label, text, cls) {
+  const det = el('details');
+  det.append(el('summary', null, label));
+  det.append(cls === 'note' ? el('div', 'note', text) : (() => {
+    const pre = el('pre', 'raw');
+    pre.textContent = text;
+    return pre;
+  })());
+  return det;
 }
 
 function onCallStart(e) {
-  const card = addCard('call streaming');
-  const meta = head(card, 'model', [
-    { text: e.role, cls: 'role-' + e.role },
-    { text: e.model },
-  ], `call ${e.call}/${e.budget}`);
-  const dots = el('div', 'dots');
-  dots.append(el('i'), el('i'), el('i'));
+  const n = push('');
   const stream = el('pre', 'stream');
-  card.append(dots, stream);
-  S.call = { card, stream, meta, dots, role: e.role, text: '' };
-  $('calls-val').textContent = `${e.call}/${e.budget}`;
-  $('calls-bar').style.width = `${(e.call / e.budget) * 100}%`;
+  n.append(stream);
+  S.call = { node: n, stream, text: '' };
+  meters(e.call, e.budget);
 }
 
 function onToken(e) {
   if (!S.call) return;
   S.call.text += e.text;
   S.call.stream.textContent = S.call.text;
-  S.call.stream.scrollTop = S.call.stream.scrollHeight;
   autoscroll();
 }
 
 function onCallEnd(e) {
-  if (!S.call) return;
-  S.call.card.classList.remove('streaming');
-  S.call.dots.remove();
-  S.call.meta.textContent = `${(e.ms / 1000).toFixed(1)}s · ${e.output_tokens} tokens`;
   $('tok-val').textContent = (+$('tok-val').textContent + e.output_tokens);
-}
-
-function onPlan(content) {
-  const card = S.call ? S.call.card : addCard('call');
-  if (S.call) S.call.stream.remove();
-  const list = el('ul', 'plan');
-  const steps = String(content).split('\n').filter(Boolean);
-  if (!steps.length) {
-    card.append(el('div', 'thought quiet', 'no usable plan — going straight to the first call'));
-  } else {
-    steps.forEach((s) => {
-      const li = el('li');
-      const m = s.match(/^\d+\.\s*(\S+)\s*-\s*(.*)$/);
-      li.append(el('code', null, m ? m[1] : s));
-      if (m && m[2]) li.append(el('span', null, m[2]));
-      list.append(li);
-    });
-    card.append(el('div', 'thought quiet', 'planned tool sequence'), list);
+  if (S.call) {
+    S.call.node.append(el('div', 'when',
+      `${(e.ms / 1000).toFixed(1)}s · ${e.output_tokens} tokens`));
   }
-  S.call = null;
 }
 
+/* The raw stream is the model thinking out loud; once the harness has parsed
+   it, the thought is what matters and the JSON is evidence. Swap one for the
+   other in place rather than adding a second row saying the same thing. */
 function onModelReply(content) {
-  const card = S.call ? S.call.card : addCard('call');
+  if (!S.call) return;
   let obj = null;
   try { obj = JSON.parse(content); } catch (_) { /* the harness will repair it */ }
-  if (S.call) {
-    S.call.stream.remove();
-    const thought = obj && (obj.thought || obj.reasoning);
-    if (thought) card.append(el('div', 'thought', String(thought)));
-    else if (!obj) card.append(el('div', 'thought quiet', 'reply was not valid JSON'));
-    const det = el('details');
-    det.append(el('summary', null, 'raw reply'));
-    const pre = el('pre', 'raw');
-    pre.textContent = content;
-    det.append(pre);
-    det.querySelector('summary').style.cssText = 'cursor:pointer;font-size:10.5px;color:var(--ink-faint);margin-top:8px';
-    card.append(det);
-  }
+  const thought = obj && (obj.thought || obj.reasoning);
+  S.call.stream.remove();
+  if (thought) S.call.node.prepend(el('div', 'think', String(thought)));
+  else if (!obj) S.call.node.prepend(el('div', 'think quiet', 'reply was not valid JSON'));
+  S.call.node.append(details('raw reply', content));
+  S.call.node.classList.add('settled');
   S.call = null;
 }
 
-function onTool(e) {
-  const err = !e.ok;
-  const card = addCard('tool' + (err ? ' err' : '') + (e.name === 'think' ? ' think' : ''));
-  const h = el('div', 'card-head');
-  h.append(el('span', 'ico', TOOL_ICON[e.name] || '🔧'),
-           el('span', 'tool-name', e.name));
-  h.append(el('span', 'spacer'), el('span', 'meta', err ? 'error' : 'ok'));
-  h.querySelector('.ico').style.marginRight = '2px';
-  card.append(h);
-
-  const args = el('div', 'args');
-  for (const [k, v] of Object.entries(e.args || {})) {
-    const row = el('div', 'arg');
-    const val = typeof v === 'string' ? v : JSON.stringify(v);
-    row.append(el('span', 'k', k + ':'), el('span', 'v', clip(val, 400)));
-    args.append(row);
-  }
-  if (args.children.length) card.append(args);
-  if (e.name !== 'think') {
-    card.append(el('div', 'result ' + (err ? 'err' : 'ok'), clip(e.result, 1200)));
-  }
-}
+let doneSummary = null;
 
 function onNote(e) {
   const k = e.kind;
   if (k === 'system') {
-    if (!S.banner) return;
-    const det = el('details');
-    det.append(el('summary', null, 'the prompt the harness built'));
-    const pre = el('pre', 'raw');
-    pre.textContent = e.content;
-    det.append(pre);
-    S.banner.append(det);
+    if (S.banner) S.banner.append(details('the prompt the harness built', e.content));
     return;
   }
-  if (k === 'task' || k === 'observation') return;   // shown by the banner / tool card
-  if (k === 'plan') return onPlan(e.content);
+  if (k === 'task' || k === 'observation') return;   // shown by the banner / tool row
+  if (k === 'plan') return drawPlan(e.content);
   if (k === 'model') return onModelReply(e.content);
 
   if (k === 'repair') {
-    const c = addCard('note repair');
-    c.append(el('div', 'tag', 'harness repaired the call'), el('div', 'note-text', e.content));
+    const d = el('div', 'note');
+    d.append(el('b', null, 'harness repaired the call'),
+             document.createTextNode(' · ' + e.content));
+    push('').append(d);
     return;
   }
+  /* The harness correcting the model is the recovery half of a failure.
+     Without it the timeline shows a tool failing and then, unexplained, the
+     same tool working, which reads as luck rather than as a system. */
   if (k === 'feedback') {
-    const c = addCard('note feedback');
-    c.append(el('div', 'tag', 'harness → model'), el('div', 'note-text', e.content));
+    const d = el('div', 'note');
+    d.append(el('b', null, 'harness → model'), document.createTextNode(' · ' + e.content));
+    push('act').append(d);
     return;
   }
   if (k === 'verify') {
     let v = {};
     try { v = JSON.parse(e.content); } catch (_) { /* keep the raw text */ }
     const ok = v.complete !== false;
-    const c = addCard('note ' + (ok ? 'verify' : 'feedback'));
-    c.append(el('div', 'tag', ok ? 'verifier: complete' : 'verifier: not done'),
-             el('div', 'note-text', ok ? 'every requirement checks out against the action log'
-                                       : `missing: ${v.missing || e.content}`));
+    const d = el('div', 'note');
+    d.append(el('b', ok ? 'good-tag' : 'bad-tag',
+                ok ? 'verified complete' : 'verifier: not done'));
+    if (!ok) d.append(document.createTextNode(' · ' + (v.missing || e.content)));
+    push(ok ? 'made' : 'bad').append(d);
     return;
   }
-  if (k === 'done') {
-    const c = addCard('done');
-    c.append(el('div', 'tag', 'done'), el('div', 'note-text', e.content || '(no summary)'));
-    c.querySelector('.tag').style.color = 'var(--good)';
-  }
+  /* Held, not drawn. The `done` note and the `end` event both carry a sentence
+     about the same run, and rendering both produced two near-identical
+     paragraphs in a row. They belong in one card. */
+  if (k === 'done') doneSummary = e.content;
+}
+
+function onTool(e) {
+  if (e.name === 'think') return;
+  const mut = MUTATORS.has(e.name);
+  /* A failed mutator used to get the green "made" dot, so a create_deck that
+     wrote nothing looked exactly like one that worked. Failure outranks
+     intent: the dot follows what happened, not what was attempted. */
+  if (e.ok) advancePlan(e.name);   // a failed call has not completed its step
+  /* has-tool is what "Steps only" filters on: this event carries an action,
+     so it survives the strip. */
+  const n = push((!e.ok ? 'bad' : mut ? 'made' : 'act') + ' has-tool');
+
+  const row = el('div', 'tool' + (e.ok ? '' : ' err'));
+  const arg = Object.values(e.args || {})[0];
+  row.append(el('span', 'nm', e.name),
+             el('span', 'arg', arg == null ? '' : clip(typeof arg === 'string' ? arg : JSON.stringify(arg), 90)),
+             el('span', 'out', e.ok ? (mut ? 'written' : 'completed') : 'failed'));
+  n.append(row);
+  /* Why it failed is the whole point of showing the failure. */
+  if (!e.ok) n.append(el('div', 'reason', clip(e.result, 600)));
+
+  if (!e.ok) return;
+  const key = TOUCH_ARG[e.name];
+  const name = key && e.args ? e.args[key] : null;
+  if (!name) return;
+  const stat = statFor(e);
+  addTouched(name, stat);
+  if (ARTIFACT_ARG[e.name]) showArtifact(name, stat);
 }
 
 function onConfirm(e) {
-  const card = addCard('confirm');
-  card.append(el('div', 'tag', `the agent wants to ${e.action}`),
-              el('div', 'note-text', e.detail));
+  const n = push('act');
+  const box = el('div', 'confirm-box');
+  box.append(el('div', 'tag', `the agent wants to ${e.action}`),
+             el('div', 'note', e.detail));
   const row = el('div', 'confirm-actions');
   const allow = el('button', 'allow', 'Allow');
   const deny = el('button', 'deny', 'Deny');
   const answer = (ok) => {
     post('/api/confirm', { id: e.id, allow: ok }).catch(() => {});
-    card.classList.add('answered');
+    box.classList.add('answered');
     row.textContent = '';
-    row.append(el('div', 'note-text', ok ? 'you allowed it' : 'you declined it'));
+    row.append(el('div', 'note', ok ? 'you allowed it' : 'you declined it'));
   };
   allow.onclick = () => answer(true);
   deny.onclick = () => answer(false);
   row.append(allow, deny);
-  card.append(row);
+  box.append(row);
+  n.append(box);
   autoscroll();
 }
 
+/* The run already emitted a summary twice — a `done` note and an `end` event —
+   both rendered as ordinary rows in the same type as everything else, so the
+   conclusion read as two more log lines. A run needs a full stop: one card,
+   answering what it did and what it made. Bounded, not a dump. */
 function onEnd(e) {
-  const card = addCard(e.finished ? 'done' : 'note');
-  head(card, e.finished ? 'run complete' : 'run stopped at the budget', []);
-  if (e.summary) card.append(el('div', 'note-text', e.summary));
-  const grid = el('div', 'summary-grid');
-  const stat = (v, l) => {
-    const s = el('div', 'stat');
-    s.append(el('b', null, String(v)), el('span', null, l));
-    return s;
+  stopClock();
+  const n = push(e.finished ? 'made' : 'bad');
+  const card = el('div', 'endcard' + (e.finished ? '' : ' cut'));
+
+  /* "Budget" is vague: it reads as money or tokens. What actually ends a run
+     is MAX_CALLS, a cap on model calls. Tokens are capped per-call by
+     num_predict and bounded by num_ctx, but neither stops a run, so naming
+     tokens here would describe a mechanism the harness does not have. */
+  card.append(el('div', 'endhead', e.finished ? 'Run complete' : 'Out of model calls'));
+
+  // what it did: the model's own sentence, not the harness's tally
+  const say = doneSummary || e.summary;
+  if (say) card.append(el('div', 'endsay', say));
+
+  /* What it made. The timeline says a file was written and then scrolls away;
+     this is the only place the outputs are listed together, and each one is
+     the same click as its tab. */
+  const made = Object.keys(panes).filter((k) => k !== 'all' && k !== 'ws');
+  if (made.length) {
+    const box = el('div', 'endmade');
+    box.append(el('div', 'endlabel', 'produced'));
+    for (const name of made) {
+      const row = el('button', 'endfile');
+      row.type = 'button';
+      row.append(el('span', 'nm', name),
+                 el('span', 'add', panes[name].stat ? panes[name].stat.textContent : ''));
+      row.onclick = () => select(name);
+      box.append(row);
+    }
+    card.append(box);
+  }
+
+  const stats = el('div', 'endstats');
+  const stat = (v, l, bad) => {
+    const d = el('div', bad ? 'bad-stat' : null);
+    d.append(el('b', null, String(v)), el('span', null, l));
+    return d;
   };
-  grid.append(stat(`${e.calls}/${e.budget}`, 'llm calls'),
-              stat(`${e.wall}s`, 'model time'),
-              stat(e.output_tokens, 'tokens out'),
-              stat(e.actions.length, 'actions'),
-              stat(e.tool_errors, 'tool errors'),
-              stat(e.parse_failures + e.invalid_calls, 'bad replies'));
-  card.append(grid);
-  if (e.log) card.append(el('div', 'note-text', `transcript saved to ${e.log}`));
+  /* calls first, flagged red when they are what stopped the run, because the
+     stat that ended the run should be the one the eye lands on */
+  stats.append(stat(`${e.calls}/${e.budget}`, 'model calls', !e.finished),
+               stat(e.output_tokens, 'tokens out'),
+               stat(`${e.wall}s`, 'model time'),
+               stat(e.actions.length, 'actions'));
+  if (e.tool_errors) stats.append(stat(e.tool_errors, 'tool errors', true));
+  if (e.parse_failures + e.invalid_calls) {
+    stats.append(stat(e.parse_failures + e.invalid_calls, 'bad replies', true));
+  }
+  card.append(stats);
+
+  if (e.log) card.append(el('div', 'endlabel', `transcript saved to ${e.log}`));
+  n.append(card);
 }
 
 function onError(e) {
-  const card = addCard('note bad');
-  card.append(el('div', 'tag', 'error'), el('div', 'note-text', e.message));
+  const n = push('bad');
+  const d = el('div', 'note');
+  d.append(el('b', 'bad-tag', 'error'), document.createTextNode(' ' + e.message));
+  n.append(d);
   if (e.trace) {
-    const pre = el('pre', 'raw');
-    pre.textContent = e.trace;
-    card.append(pre);
+    const det = details('traceback', e.trace);
+    det.className = 'trace';
+    n.append(det);
   }
+}
+
+/* One place that knows everything a run accumulates. Anything added to that
+   list later has to be cleared here too, which is why it is one function
+   rather than scattered resets. Without it a second Run stacks on the first:
+   the plan strip doubles, spent steps reappear, artifact tabs pile up. */
+function resetRun() {
+  feed.textContent = '';
+  $('empty').classList.add('hidden');
+  $('plan').textContent = '';
+  planSteps = [];
+  S.call = null;
+  S.banner = null;
+  doneSummary = null;
+  $('tok-val').textContent = '0';
+  startClock();
+
+  for (const k of Object.keys(panes)) {
+    if (k === 'all' || k === 'ws') continue;
+    panes[k].pane.remove();
+    panes[k].tab.remove();
+    delete panes[k];
+  }
+  $('grid-all').textContent = '';
+  $('grid-all').classList.add('hidden');
+  $('holding').classList.remove('hidden');
+  allCount.textContent = '0';
+  select('all');
+
+  for (const k of Object.keys(touched)) delete touched[k];
+  if (overflowChip) { overflowChip.remove(); overflowChip = null; }
+  $('touched').querySelectorAll('.chip').forEach((c) => c.remove());
+  $('touched-none').classList.remove('hidden');
 }
 
 /* ---------------------------------------------------------------- run --- */
@@ -731,12 +1013,11 @@ async function startRun() {
     max_calls: parseInt($('opt-calls').value, 10) || null,
     model: $('model').value || null,
   };
-  clearStage();
+  resetRun();
   let res;
   try {
     res = await post('/api/run', body);
   } catch (err) {
-    $('empty').classList.add('hidden');
     return onError({ message: err.message });
   }
   S.run = res.run;
@@ -744,12 +1025,7 @@ async function startRun() {
   S.first = false;
   $('run').disabled = true;
   $('stop').classList.remove('hidden');
-  $('tok-val').textContent = '0';
   ['meter-calls', 'meter-time', 'meter-tok'].forEach((id) => $(id).classList.remove('hidden'));
-  S.t0 = Date.now();
-  S.timer = setInterval(() => {
-    $('time-val').textContent = `${Math.round((Date.now() - S.t0) / 1000)}s`;
-  }, 500);
 
   S.es = new EventSource(`/api/events?run=${S.run}`);
   S.es.onmessage = (m) => handle(JSON.parse(m.data));
@@ -758,7 +1034,7 @@ async function startRun() {
 
 function finishRun() {
   if (S.es) { S.es.close(); S.es = null; }
-  if (S.timer) { clearInterval(S.timer); S.timer = null; }
+  stopClock();
   S.run = null;
   S.call = null;
   $('run').disabled = false;
@@ -766,6 +1042,93 @@ function finishRun() {
   loadAgents(true);
   loadWorkspace();
 }
+
+/* --------------------------------------------------------------- chrome -- */
+
+/* An explicit choice, stored, beating the OS preference in both directions. No
+   attribute at all means "follow the OS", which is the right default and is
+   what a first-time visitor gets. */
+const themeBtn = $('theme');
+const isDark = () => {
+  const set = document.documentElement.getAttribute('data-theme');
+  return set ? set === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+};
+const paintTheme = () => {
+  // the drawn mark stays; only the label changes, and it names the action
+  themeBtn.title = isDark() ? 'Switch to light' : 'Switch to dark';
+  themeBtn.setAttribute('aria-label', themeBtn.title);
+};
+try {
+  const saved = localStorage.getItem('agentlab-theme');
+  if (saved) document.documentElement.setAttribute('data-theme', saved);
+} catch (_) { /* storage blocked; the OS default still works */ }
+themeBtn.onclick = () => {
+  const next = isDark() ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  try { localStorage.setItem('agentlab-theme', next); } catch (_) {}
+  paintTheme();
+};
+// follow the OS while the user has not overridden it
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', paintTheme);
+paintTheme();
+
+/* Ratio, not pixels: a pixel width would mean the split silently changes
+   meaning when the window resizes. Percent keeps the user's intent ("show me
+   more of the run") true at any size. */
+const splitter = $('splitter');
+const MIN_PCT = 24, MAX_PCT = 68;
+
+function setSplit(pct) {
+  const v = Math.min(MAX_PCT, Math.max(MIN_PCT, pct));
+  document.documentElement.style.setProperty('--run-pct', v + '%');
+  splitter.setAttribute('aria-valuenow', Math.round(v));
+  try { localStorage.setItem('agentlab-split', String(v)); } catch (_) {}
+}
+try {
+  const saved = parseFloat(localStorage.getItem('agentlab-split'));
+  if (!Number.isNaN(saved)) setSplit(saved);
+} catch (_) {}
+
+splitter.addEventListener('pointerdown', (ev) => {
+  ev.preventDefault();
+  splitter.setPointerCapture(ev.pointerId);   // keep tracking outside the 6px
+  splitter.classList.add('dragging');
+  document.body.classList.add('resizing');
+  const rect = document.querySelector('.body').getBoundingClientRect();
+  const move = (m) => setSplit(((m.clientX - rect.left) / rect.width) * 100);
+  const up = () => {
+    splitter.classList.remove('dragging');
+    document.body.classList.remove('resizing');
+    splitter.removeEventListener('pointermove', move);
+    splitter.removeEventListener('pointerup', up);
+    splitter.removeEventListener('pointercancel', up);
+  };
+  splitter.addEventListener('pointermove', move);
+  splitter.addEventListener('pointerup', up);
+  splitter.addEventListener('pointercancel', up);
+});
+
+/* A separator that only responds to a mouse is not a control. Arrows nudge,
+   Home/End jump to the limits, and double-click resets to the default rather
+   than leaving the user to hunt for it. */
+splitter.addEventListener('keydown', (ev) => {
+  const now = parseFloat(splitter.getAttribute('aria-valuenow'));
+  const to = { ArrowLeft: now - 2, ArrowRight: now + 2,
+               Home: MIN_PCT, End: MAX_PCT }[ev.key];
+  if (to === undefined) return;
+  ev.preventDefault();
+  setSplit(to);
+});
+splitter.addEventListener('dblclick', () => setSplit(50));
+
+/* Steps only. Pure presentation: nothing is dropped from the DOM, so toggling
+   back mid-run loses nothing and the filter costs one class on <body>. */
+const stepsToggle = $('steps-toggle');
+stepsToggle.onclick = () => {
+  const on = document.body.classList.toggle('steps-only');
+  stepsToggle.setAttribute('aria-pressed', on ? 'true' : 'false');
+  autoscroll();
+};
 
 /* --------------------------------------------------------------- boot --- */
 
