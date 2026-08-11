@@ -20,6 +20,7 @@ ROWS = [
     ("Region", "Q2", "Q3"),
     ("West", 1105000, 1240000),
     ("East", 802000, 845000),
+    ("Central", 415000, 392000),
     ("Online", 498000, 610000),
 ]
 
@@ -40,7 +41,7 @@ def main():
     ws.title = "Q3"
     for row in ROWS:
         ws.append(row)
-    for cell in ("B2", "B3", "B4", "C2", "C3", "C4"):
+    for cell in ("B2", "B3", "B4", "B5", "C2", "C3", "C4", "C5"):
         ws[cell].number_format = "#,##0"
     wb.save(os.path.join(FILES, "q3_raw.xlsx"))
 

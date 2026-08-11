@@ -527,11 +527,40 @@ class TestVerifier(unittest.TestCase):
         for. The run still completes - the writes already happened, and undoing
         them would be a bigger side effect than the one reported - but the
         episode carries the report for the runner and the UI to surface."""
+        execute("cancel_event", {"id": "c2"}, self.world, None)
         verdict = ('{"complete": true, "missing": "",'
-                   ' "unrequested": "cancelled the Design review"}')
+                   ' "unrequested": "cancel_event on the Design review"}')
         llm = _StubLLM(verdict)
         out = agent._verify(llm, self.world, "remember my preference")
-        self.assertEqual(out["unrequested"], "cancelled the Design review")
+        self.assertEqual(out["unrequested"], "cancel_event")
+
+    def test_a_mangled_unrequested_report_is_reduced_to_tool_names(self):
+        """Observed live, twice: the 8B copies the evidence line's own format and
+        runs out of tokens mid-string, giving "send_email({" and
+        "['list_emails({}) -> ok: [ ... ]', -1]". Both went to the UI verbatim.
+        Repair it deterministically rather than trusting the format instruction:
+        keep the tool names the run actually performed, drop the rest."""
+        execute("send_email", {"to": "d@c.com", "subject": "s", "body": "b"}, self.world, None)
+        for mangled, want in (('send_email({', "send_email"),
+                              ("['list_emails({}) -> ok: [ ... ]', -1]", ""),
+                              ('the assistant called send_email which was not asked for',
+                               "send_email")):
+            out = agent._verify(_StubLLM(json.dumps({"complete": True, "missing": "",
+                                                     "unrequested": mangled})),
+                                self.world, "t")
+            self.assertEqual(out["unrequested"], want)
+
+    def test_reads_are_never_reported_as_unrequested(self):
+        """The system prompt says reading is never unrequested; the 8B says it
+        anyway. Observed live: "list_emails, read_spreadsheet" on a run whose
+        only real fault was doing nothing wrong. Looking around is how the agent
+        avoids inventing data, so reporting it teaches exactly the wrong lesson."""
+        execute("list_emails", {}, self.world, None)
+        execute("send_email", {"to": "d@c.com", "subject": "s", "body": "b"}, self.world, None)
+        out = agent._verify(_StubLLM(json.dumps(
+            {"complete": True, "missing": "",
+             "unrequested": "list_emails, send_email"})), self.world, "t")
+        self.assertEqual(out["unrequested"], "send_email")
 
     def test_a_none_ish_unrequested_report_is_treated_as_empty(self):
         """Small models answer "None" instead of an empty string."""
@@ -732,18 +761,138 @@ class TestLoop(unittest.TestCase):
     def test_an_unplanned_write_is_questioned_once_then_allowed(self):
         """Asked only to "list my emails", an 8B sent an email, added an event
         and messaged a third party. A write the model's own plan never named is
-        questioned once; if it insists, it runs - question, never forbid."""
+        challenged once; if it insists, it runs - question, never forbid.
+
+        Since replanning landed, the challenge on a task that has already read
+        something is the replan call rather than the question: a model that
+        still wants the write says so in the revised plan and it runs. That is
+        deliberately the same strength as before - the old guard was always a
+        speed bump the model could clear by repeating itself, and an 8B clears
+        this one by restating. The verifier's unrequested report is what
+        actually catches the side effect, and it is unchanged."""
         agent.set_profile(profiles.replace(profiles.DEFAULT, plan=True, verify_rounds=0))
         plan = '{"steps": [{"tool": "list_emails", "what": "list them"}]}'
         llm = _ScriptedLLM([plan,
                             self.call("list_emails"),
-                            self.call("send_message", to="sam", text="fyi"),   # questioned
+                            self.call("send_message", to="sam", text="fyi"),   # challenged
+                            '{"steps": [{"tool": "send_message", "what": "tell sam"}]}',
                             self.call("send_message", to="sam", text="fyi"),   # insists: runs
                             self.call("done", summary="done")])
         agent.run_harness(llm, self.world, self.mem, "List my emails")
         self.assertEqual(len(self.world.messages), 1)
-        nudges = [f for f in llm.seen_feedback if "never included send_message" in f]
-        self.assertEqual(len(nudges), 1)
+        self.assertFalse([f for f in llm.seen_feedback if "never included send_message" in f])
+
+    def test_a_write_discovered_by_reading_gets_the_plan_revised_not_refused(self):
+        """The plan is written before the agent has read anything, so it cannot
+        name work the task's own data turns out to require. Observed live: asked
+        to "read Dana's newest email and do what she asks", the plan was
+        list/read/send; the email asked for a spreadsheet; the guard told the
+        model its plan never included create_spreadsheet and to do "nothing
+        extra"; the model sent an email CLAIMING it had built the sheet and
+        stopped. A plan made before discovery is a hypothesis: once a read has
+        landed, revise it instead of holding the model to it."""
+        agent.set_profile(profiles.replace(profiles.DEFAULT, plan=True, verify_rounds=0))
+        blind = '{"steps": [{"tool": "list_emails", "what": "find it"}, ' \
+                '{"tool": "read_email", "what": "read it"}]}'
+        revised = '{"steps": [{"tool": "create_spreadsheet", "what": "what she asked for"}]}'
+        llm = _ScriptedLLM([blind,
+                            self.call("list_emails"),
+                            self.call("read_email", id="e1"),
+                            self.call("create_spreadsheet", filename="q.xlsx",
+                                      rows=[["a"], ["1"]]),
+                            revised,          # the replan call
+                            self.call("done", summary="built it")])
+        agent.run_harness(llm, self.world, self.mem, "Read the newest email and do what it asks")
+        self.assertEqual(os.listdir(self.world.files_dir), ["q.xlsx"])  # it ran, not refused
+        self.assertFalse([f for f in llm.seen_feedback if "never included" in f])
+
+    def test_the_plan_is_only_revised_once(self):
+        """A second discovery falls back to the question. Revising on every
+        surprise would let a wandering agent rewrite its way to anything."""
+        agent.set_profile(profiles.replace(profiles.DEFAULT, plan=True, verify_rounds=0))
+        blind = '{"steps": [{"tool": "list_emails", "what": "find it"}]}'
+        revised = '{"steps": [{"tool": "create_spreadsheet", "what": "the sheet"}]}'
+        llm = _ScriptedLLM([blind,
+                            self.call("list_emails"),
+                            self.call("create_spreadsheet", filename="q.xlsx", rows=[["a"]]),
+                            revised,
+                            self.call("send_message", to="sam", text="fyi"),  # questioned
+                            self.call("done", summary="done")])
+        agent.run_harness(llm, self.world, self.mem, "List my emails and do what they ask")
+        self.assertEqual(len(self.world.messages), 0)
+        self.assertEqual(len([f for f in llm.seen_feedback
+                              if "never included send_message" in f]), 1)
+
+    def test_an_unplanned_write_before_any_read_is_still_questioned(self):
+        """Nothing has been discovered yet, so there is nothing to revise
+        against and the plan still stands."""
+        agent.set_profile(profiles.replace(profiles.DEFAULT, plan=True, verify_rounds=0))
+        plan = '{"steps": [{"tool": "list_emails", "what": "list them"}]}'
+        llm = _ScriptedLLM([plan,
+                            self.call("send_message", to="sam", text="fyi"),
+                            self.call("done", summary="done")])
+        agent.run_harness(llm, self.world, self.mem, "List my emails")
+        self.assertEqual(len(self.world.messages), 0)
+        self.assertTrue([f for f in llm.seen_feedback if "never included send_message" in f])
+
+    def test_the_unplanned_write_question_does_not_tell_the_model_to_stop(self):
+        """"Only do what the task requires - nothing extra" is what an 8B obeys
+        instead of insisting, which turns a question into a block."""
+        agent.set_profile(profiles.replace(profiles.DEFAULT, plan=True, verify_rounds=0))
+        llm = _ScriptedLLM(['{"steps": [{"tool": "list_emails", "what": "list"}]}',
+                            self.call("send_message", to="sam", text="fyi"),
+                            self.call("done", summary="done")])
+        agent.run_harness(llm, self.world, self.mem, "List my emails")
+        asked = [f for f in llm.seen_feedback if "never included send_message" in f][0]
+        self.assertNotIn("nothing extra", asked)
+        self.assertIn("call it again", asked)
+
+    def test_a_file_named_by_what_was_read_is_questioned_before_writing_over_it(self):
+        """Observed live: the email said "the export is in q3_raw.xlsx", the
+        agent never opened it, and invented Sales/Profit rows with formulas over
+        empty cells. Writing from memory when the task's own data is sitting in
+        a file on disk is the failure the whole harness exists to catch."""
+        agent.set_profile(profiles.replace(profiles.DEFAULT, plan=False, verify_rounds=0))
+        office.create_spreadsheet(self.world.files_dir, "q3_raw.xlsx",
+                                  [["Region", "Q3"], ["West", 1240000]])
+        self.world.emails.insert(0, {"id": "e99", "from": "dana@corp.com",
+                                     "date": "2026-07-20 08:40", "subject": "numbers",
+                                     "body": "The export is in q3_raw.xlsx, pull the Q3 column."})
+        llm = _ScriptedLLM([self.call("read_email", id="e99"),
+                            self.call("create_spreadsheet", filename="out.xlsx",
+                                      rows=[["Sales"], ["1"]]),          # questioned
+                            self.call("read_spreadsheet", filename="q3_raw.xlsx"),
+                            self.call("create_spreadsheet", filename="out.xlsx",
+                                      rows=[["Region", "Q3"], ["West", 1240000]]),
+                            self.call("done", summary="done")])
+        agent.run_harness(llm, self.world, self.mem, "Do what the newest email asks")
+        # Match the nudge's own wording: an OBSERVATION also carries the
+        # filename, and asserting on the filename alone passes without a nudge.
+        self.assertTrue([f for f in llm.seen_feedback if "have not opened q3_raw.xlsx" in f])
+
+    def test_the_unread_file_question_fires_once_then_lets_it_through(self):
+        agent.set_profile(profiles.replace(profiles.DEFAULT, plan=False, verify_rounds=0))
+        office.create_spreadsheet(self.world.files_dir, "q3_raw.xlsx", [["a"], ["1"]])
+        self.world.emails.insert(0, {"id": "e99", "from": "d@c.com", "date": "2026-07-20 08:40",
+                                     "subject": "n", "body": "see q3_raw.xlsx"})
+        llm = _ScriptedLLM([self.call("read_email", id="e99"),
+                            self.call("create_spreadsheet", filename="out.xlsx", rows=[["x"]]),
+                            self.call("create_spreadsheet", filename="out.xlsx", rows=[["x"]]),
+                            self.call("done", summary="done")])
+        agent.run_harness(llm, self.world, self.mem, "Do what the newest email asks")
+        self.assertEqual(len([f for f in llm.seen_feedback
+                              if "have not opened q3_raw.xlsx" in f]), 1)
+        self.assertEqual(sorted(os.listdir(self.world.files_dir)),
+                         ["out.xlsx", "q3_raw.xlsx"])
+
+    def test_a_file_that_was_never_mentioned_is_not_questioned(self):
+        agent.set_profile(profiles.replace(profiles.DEFAULT, plan=False, verify_rounds=0))
+        office.create_spreadsheet(self.world.files_dir, "unrelated.xlsx", [["a"], ["1"]])
+        llm = _ScriptedLLM([self.call("list_emails"),
+                            self.call("create_spreadsheet", filename="out.xlsx", rows=[["x"]]),
+                            self.call("done", summary="done")])
+        agent.run_harness(llm, self.world, self.mem, "Make a sheet")
+        self.assertFalse([f for f in llm.seen_feedback if "unrelated.xlsx" in f])
 
     def test_a_planned_write_is_never_questioned(self):
         agent.set_profile(profiles.replace(profiles.DEFAULT, plan=True, verify_rounds=0))
@@ -810,14 +959,14 @@ class TestLoop(unittest.TestCase):
                 if role == "verifier":
                     self.calls += 1
                     return ('{"complete": true, "missing": "",'
-                            ' "unrequested": "messaged Sam"}')
+                            ' "unrequested": "send_message"}')
                 return super().chat(messages, **kw)
 
         llm = VerifierAware([self.call("send_message", to="sam", text="hi"),
                              self.call("done", summary="did it")])
         ep = agent.run_harness(llm, self.world, self.mem, "message sam")
         self.assertTrue(ep.finished)
-        self.assertEqual(ep.unrequested, "messaged Sam")
+        self.assertEqual(ep.unrequested, "send_message")
 
     def test_the_budget_is_a_hard_stop(self):
         agent.set_profile(profiles.replace(profiles.DEFAULT, plan=False, verify_rounds=0))

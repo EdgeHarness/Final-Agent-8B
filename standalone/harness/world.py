@@ -113,6 +113,14 @@ class World:
             self.reminders = []
         self.actions = []  # log of every mutating/inspecting tool call (per episode)
 
+    def file_names(self):
+        """What is on disk right now. The loop asks so it can tell a filename
+        the agent was told about from one it merely invented."""
+        try:
+            return set(os.listdir(self.files_dir))
+        except OSError:
+            return set()
+
     # ---- email ----
     def list_emails(self):
         rows = sorted(self.emails, key=lambda e: e["date"], reverse=True)

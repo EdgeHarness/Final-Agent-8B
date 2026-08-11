@@ -396,6 +396,22 @@ PLAN_PROMPT = ('Which tools will you need to call to complete this task, in orde
                'Most tasks need only 1-4 calls. Do not include tools the task does not need.')
 
 
+FILENAME_RE = re.compile(r"\b[\w.\-]+\.xlsx\b")
+
+# The tools that change something. Module level because the verifier needs the
+# same answer the loop uses when it decides what counts as a side effect.
+BASE_WRITE_TOOLS = frozenset({"send_email", "add_event", "update_event", "cancel_event",
+                              "send_message", "set_reminder", "create_presentation",
+                              "create_spreadsheet", "save_memory"})
+
+REPLAN_PROMPT = (
+    'TASK: {task}\n\nYour plan was written before you had read anything:\n{plan}\n\n'
+    'You have now read something, and it may require work the plan does not '
+    'name. Rewrite the plan for what is ACTUALLY left to do, as tool names. '
+    'Respond with one JSON object: {{"steps": [{{"tool": "<tool name>", "what": '
+    '"<why>"}}]}} - and nothing the task does not need.')
+
+
 def planned_tools(plan_text):
     """The tool names out of a rendered plan, in order. plan_step writes each
     step as "N. tool - what", so this reads back what it wrote."""
@@ -463,9 +479,7 @@ def run_harness(llm, world, mem, task_text, history=""):
     world_version = 0    # bumped on successful writes; a call's repeat budget is
                          # only spent while the world is unchanged, and resets
                          # the moment anything writes
-    write_tools = {"send_email", "add_event", "update_event", "cancel_event",
-                   "send_message", "set_reminder",
-                   "create_presentation", "create_spreadsheet", "save_memory"}
+    write_tools = set(BASE_WRITE_TOOLS)
     write_tools |= EXTRA_WRITE_TOOLS  # empty for the benchmark; fs_tools adds its own
 
     # The plan was rendered for the model to read and then never looked at
@@ -505,6 +519,16 @@ def run_harness(llm, world, mem, task_text, history=""):
     # exempt (remembering is never a side effect on another person).
     planned_set = set(planned)
     questioned_writes = set()
+    replanned = False
+    # Files the run has been TOLD about (a filename inside something it read)
+    # versus files it has actually opened. Writing a document while the task's
+    # own data sits unopened in a file on disk is the same failure as writing
+    # before reading anything, one step further in: observed live, an email said
+    # "the export is in q3_raw.xlsx", the agent never opened it, and invented
+    # Sales/Profit rows with formulas summing empty cells.
+    mentioned_files = set()
+    opened_files = set()
+    questioned_files = set()
     last_reply = None
     think_streak = 0
 
@@ -599,12 +623,51 @@ def run_harness(llm, world, mem, task_text, history=""):
 
             if (planned_set and name in write_tools and name != "save_memory"
                     and name not in planned_set and name not in questioned_writes):
-                questioned_writes.add(name)
+                # The plan is written before the agent has read anything, so on
+                # any task whose requirements live in the data ("read this email
+                # and do what it asks") it CANNOT name the work. Holding the
+                # model to it then punishes the model for discovering the job.
+                # Observed live: plan was list/read/send, the email asked for a
+                # spreadsheet, the model correctly called create_spreadsheet,
+                # this guard questioned it, and the model gave up and sent an
+                # email claiming it had built the sheet. Nothing was built and
+                # every surface reported success.
+                #
+                # So: a plan made before discovery is a hypothesis. Once a read
+                # has landed, spend one call revising it instead. Only once - a
+                # model that could re-plan on every surprise could rewrite its
+                # way to anything, which is the guard this replaces.
+                if looked and not replanned:
+                    replanned = True
+                    messages.append({"role": "user", "content": REPLAN_PROMPT.format(
+                        task=task_text, plan=plan or "(none)")})
+                    plan = plan_step(llm, messages, ep) or plan
+                    messages.pop()
+                    planned = planned_tools(plan)
+                    planned_set = set(planned)
+                if name not in planned_set:
+                    questioned_writes.add(name)
+                    give_feedback(
+                        f"Your plan for this task never included {name}, and the task is: "
+                        f"\"{task_text}\". If {name} is genuinely what the task needs, "
+                        f"call it again and it will run. If it is not, continue with the "
+                        f"plan or call done.",
+                        reply)
+                    continue
+
+            # Same contract, one step further in than the nudge below: there,
+            # nothing has been read at all; here, something was read and it
+            # named a file that exists and is still unopened.
+            unread = sorted(mentioned_files & set(world.file_names()) - opened_files
+                            - questioned_files)
+            if unread and name in ("create_spreadsheet", "create_presentation"):
+                questioned_files.update(unread)
                 give_feedback(
-                    f"Your plan for this task never included {name}, and the task is: "
-                    f"\"{task_text}\". Only do what the task requires - nothing extra. "
-                    f"If {name} is genuinely needed, call it again and it will run; "
-                    f"otherwise continue with the plan or call done.",
+                    f"What you read names {unread[0]}, which exists here, and you "
+                    f"have not opened {unread[0]} yet - so {name} would be writing "
+                    f"from memory rather than from the task's own data. Call "
+                    f"read_spreadsheet on it first. If you genuinely do not need it, "
+                    f"call {name} again and it will run.",
                     reply)
                 continue
 
@@ -666,6 +729,12 @@ def run_harness(llm, world, mem, task_text, history=""):
             ok, obs = execute(name, args, world, mem)
             if ok and name not in write_tools and name != "think":
                 looked = True
+                # A filename the run was told about, from the result rather than
+                # from the model's own words: a model that writes "I'll check
+                # data.xlsx" has not been told anything.
+                mentioned_files.update(FILENAME_RE.findall(str(obs)))
+            if ok and name == "read_spreadsheet":
+                opened_files.add(str(args.get("filename", "")))
             if ok and name in write_tools:
                 world_version += 1
             # recorded against the world version AFTER any bump, so an identical
@@ -714,8 +783,8 @@ def _verify(llm, world, task_text):
                 "that satisfies it. Report as missing only a requirement with no such action. "
                 'Respond with one JSON object: {"complete": true or false, "missing": "<the '
                 'task requirements with no matching action, or an empty string>", '
-                '"unrequested": "<world-changing actions the task never asked for, or an '
-                'empty string>"}')
+                '"unrequested": "<TOOL NAMES ONLY, comma separated, of world-changing '
+                'actions the task never asked for - or an empty string>"}')
     msgs = [{"role": "system", "content": VERIFY_SYSTEM.format(today=SIM_TODAY_HUMAN)},
             {"role": "user", "content": prompt}]
     # Failing open is the right call: a broken verifier must not trap the agent
@@ -726,6 +795,21 @@ def _verify(llm, world, task_text):
         reply = llm.chat(msgs, force_json=True, num_predict=200, role="verifier")
         obj, _ = parse_lenient(reply)
         if isinstance(obj, dict) and isinstance(obj.get("complete"), bool):
+            # Repair before rejection, the same as everywhere else in the loop.
+            # The format instruction alone does not hold at 8B: it copies the
+            # evidence line's shape and runs out of tokens mid-string, and
+            # "send_email({" went to the UI verbatim. Keep the tool names this
+            # run actually performed and drop whatever else came back.
+            # Writes only. The system prompt already says reading is never
+            # unrequested and the 8B reports it anyway - observed live,
+            # "list_emails, read_spreadsheet" on a run that had looked before it
+            # wrote, which is the behaviour the rest of the harness is built to
+            # produce. Flagging it would teach precisely the wrong lesson.
+            said = str(obj.get("unrequested") or "")
+            writes = BASE_WRITE_TOOLS | EXTRA_WRITE_TOOLS
+            obj["unrequested"] = ", ".join(sorted(
+                {a["tool"] for a in acts if a["tool"] in writes
+                 and re.search(rf"\b{re.escape(a['tool'])}\b", said)}))
             return obj
         return {"complete": True, "missing": "", "unverified": "verifier reply was not usable"}
     except Exception as exc:
