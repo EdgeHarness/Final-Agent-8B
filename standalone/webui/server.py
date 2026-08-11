@@ -38,6 +38,33 @@ from harness import mcp_config  # noqa: E402
 from harness import profiles  # noqa: E402
 
 # Rough per-size guidance for the picker; the machine, not the harness, decides.
+# Model facts from openrouter.ai, generated into model_catalog.json rather than
+# fetched. The product's whole claim is that nothing leaves the machine, so the
+# UI must not reach the network to describe a model. Regenerate with
+# tools/refresh_catalog.py when the shipped model list changes.
+def _load_catalog():
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model_catalog.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f).get("models", {})
+    except (OSError, ValueError):
+        return {}
+
+
+CATALOG = _load_catalog()
+
+
+def catalog_for(tag):
+    """Exact tag first, then the bare family, so llama3.1 matches llama3.1:8b."""
+    if tag in CATALOG:
+        return CATALOG[tag]
+    base = tag.split(":")[0]
+    for key, val in CATALOG.items():
+        if key.split(":")[0] == base:
+            return val
+    return {}
+
+
 SPEED_HINT = {
     "1b": ("instant", "Fast enough to feel live. Makes the most mistakes — the best "
                       "place to watch the harness repair a call."),
@@ -120,6 +147,7 @@ def agent_list():
             "note": cfg.get("note", ""),
             "speed": speed,
             "blurb": blurb,
+            "catalog": catalog_for(cfg["model"]),
             "profile": profile.to_dict(),
             "installed": tag_installed(cfg["model"], tags),
             "files": len(os.listdir(files_dir)) if os.path.isdir(files_dir) else 0,
@@ -128,7 +156,14 @@ def agent_list():
             "memories": sum(1 for _ in open(mem_path, encoding="utf-8"))
                         if os.path.isfile(mem_path) else 0,
         })
+    # Models the catalog knows about that are not installed. The rail offers
+    # them for download, so a machine with one model is not a dead end.
+    have = {a["model"] for a in out}
+    available = [dict(v, tag=k) for k, v in CATALOG.items()
+                 if k not in have and not tag_installed(k, tags)]
+    available.sort(key=lambda m: m["tag"])
     return {"agents": out, "ollama": tags is not None, "presets": PRESET_TASKS,
+            "available": available,
             "project": PROJECT, "installed_models": sorted(tags or {})}
 
 
@@ -615,8 +650,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                        "status": run.status if run else "idle"})
             if path == "/api/events":
                 return self.stream_events(q)
-            if path == "/api/pull":
-                return self.stream_pull(q.get("model", ""))
         except ValueError as e:
             return self.send_json({"error": str(e)}, 400)
         except FileNotFoundError as e:
@@ -734,35 +767,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
             pass
         finally:
             run.unsubscribe(sub)
-
-    def stream_pull(self, model):
-        """Download a model from the picker, so 'run the 14B' never means
-        leaving the page for a terminal."""
-        self.open_stream()
-        self.close_connection = True
-        if not model:
-            return self.push({"t": "error", "message": "no model given"})
-        try:
-            with requests.post(f"{OLLAMA_URL}/api/pull", json={"model": model},
-                               stream=True, timeout=None) as r:
-                r.raise_for_status()
-                for line in r.iter_lines(decode_unicode=True):
-                    if not line:
-                        continue
-                    msg = json.loads(line)
-                    self.push({"t": "pull", "status": msg.get("status", ""),
-                               "completed": msg.get("completed", 0),
-                               "total": msg.get("total", 0),
-                               "error": msg.get("error")})
-            self.push({"t": "closed", "status": "done"})
-        except (BrokenPipeError, ConnectionResetError):
-            pass
-        except Exception as e:
-            try:
-                self.push({"t": "error", "message": f"{type(e).__name__}: {e}"})
-            except OSError:
-                pass
-
 
 class Server(http.server.ThreadingHTTPServer):
     daemon_threads = True

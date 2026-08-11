@@ -483,11 +483,16 @@ def _verify(llm, world, task_text):
     msgs = [{"role": "system", "content": "You are a strict task-completion verifier. Today is "
              + SIM_TODAY_HUMAN + "."},
             {"role": "user", "content": prompt}]
+    # Failing open is the right call: a broken verifier must not trap the agent
+    # in a loop it cannot exit. But an unmarked {"complete": true} is
+    # indistinguishable from a genuine pass, so a systematically broken verifier
+    # reads as a clean run in every transcript. The flag says which one it was.
     try:
         reply = llm.chat(msgs, force_json=True, num_predict=200, role="verifier")
         obj, _ = parse_lenient(reply)
         if isinstance(obj, dict) and isinstance(obj.get("complete"), bool):
             return obj
-    except Exception:
-        pass
-    return {"complete": True, "missing": ""}
+        return {"complete": True, "missing": "", "unverified": "verifier reply was not usable"}
+    except Exception as exc:
+        return {"complete": True, "missing": "",
+                "unverified": f"verifier failed: {type(exc).__name__}"}

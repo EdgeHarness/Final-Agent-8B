@@ -38,73 +38,37 @@ const TOOL_ICON = {
   delete_path: '🗑️', move_path: '↔️', search_files: '🔎', run_command: '⌨️',
 };
 
+/* A call that changes the world, rather than reading it. The dot on the
+   timeline is green for these and blue for a read, so the shape of a run is
+   legible before a word of it is read. */
+const MUTATORS = new Set([
+  'send_email', 'add_event', 'send_message', 'set_reminder', 'save_memory',
+  'create_presentation', 'create_spreadsheet',
+  'write_file', 'append_file', 'delete_path', 'move_path', 'run_command',
+]);
+
+/* Which argument names the file a tool produced. Office files land in the
+   agent's workspace, which is what /api/preview can read, so those get a real
+   preview pane. write_file and append_file go to the user's own folder: they
+   belong in the touched strip, but there is nothing to render for them. */
+const ARTIFACT_ARG = { create_presentation: 'filename', create_spreadsheet: 'filename' };
+const TOUCH_ARG = { ...ARTIFACT_ARG, write_file: 'path', append_file: 'path' };
+
 const S = {
   agents: [], agent: null, ws: null, run: null, es: null,
-  call: null, banner: null, t0: 0, timer: null, seen: {}, first: true,
+  call: null, t0: 0, timer: null, seen: {}, first: true,
   open: new Set(['files', 'inbox', 'calendar']),
 };
-
-/* ------------------------------------------------- real accounts (mcp) --- */
-
-/* The registry, rendered as checkboxes. Fetched once — servers.json is static
-   for the life of the process. Each server's setup steps ride along as the
-   title, so hovering says what it needs before it will work. */
-async function loadMcp() {
-  let servers;
-  try {
-    servers = await api('/api/mcp');
-  } catch (err) {
-    return;                       // no registry is not a reason to break the panel
-  }
-  const box = $('opt-mcp');
-  box.textContent = '';
-  for (const s of servers) {
-    // Built as nodes, not markup: the setup text goes into a title attribute and
-    // esc() only covers &<>, so a quote in servers.json would break out of it.
-    const label = el('label', 'check');
-    label.title = s.setup;
-    const cb = el('input');
-    cb.type = 'checkbox';
-    cb.className = 'mcp-server';
-    cb.value = s.name;
-    cb.onchange = refreshConnState;
-    label.append(cb, ` ${s.name} `, el('em', null, s.summary));
-    box.append(label);
-  }
-  $('opt-mcp-mode').onchange = refreshConnState;
-  refreshConnState();
-}
-
-function mcpSelected() {
-  return [...document.querySelectorAll('.mcp-server:checked')].map((el) => el.value);
-}
-
-/* The sidebar pill. It states whether real accounts are in play, because that is
-   the difference between a demo and the agent touching someone's actual mail.
-   Live mode is amber on purpose: it is the one setting that lets a local model
-   put a message in front of another human. */
-function refreshConnState() {
-  const on = mcpSelected();
-  const mode = $('opt-mcp-mode').value;
-  const pill = $('conn-state');
-  if (!on.length) {
-    pill.className = 'pill-off';
-    pill.textContent = 'none connected';
-    return;
-  }
-  const n = `${on.length} real account${on.length > 1 ? 's' : ''}`;
-  pill.className = 'pill-on' + (mode === 'live' ? ' live' : '');
-  pill.textContent = mode === 'live' ? `${n} · LIVE` : `${n} · ${mode.replace('_', ' ')}`;
-}
 
 /* ------------------------------------------------------------- models --- */
 
 async function loadAgents(keep) {
   const data = await api('/api/agents');
   S.agents = data.agents;
-  $('meter-ollama').className = 'meter ' + (data.ollama ? 'up' : 'down');
+  S.available = data.available || [];
+  $('meter-ollama').className = 'meter dotmeter ' + (data.ollama ? 'up' : 'down');
   $('meter-ollama').querySelector('.label').textContent =
-    data.ollama ? 'ollama running' : 'ollama not running';
+    data.ollama ? 'Ollama running' : 'Ollama not running';
   renderPresets(data.presets);
   renderAgents();
   renderModels(data.installed_models);
@@ -114,60 +78,122 @@ async function loadAgents(keep) {
   }
 }
 
+/* The model tag is what a person picks by, so it leads. The folder label ("8B")
+   was the headline and the tag was supporting text under it, which had the
+   naming backwards: every folder is named after its model, so the folder label
+   only repeats the tag in a vaguer form.
+   Below it, the model's own description, generated from openrouter into
+   model_catalog.json and shipped, so describing a model needs no network. */
+function agentRow(a) {
+  const on = a.id === S.agent;
+  const cat = a.catalog || {};
+  const card = el('button', 'agent' + (on ? ' on' : ''));
+  card.type = 'button';
+  card.setAttribute('role', 'radio');
+  card.setAttribute('aria-checked', on ? 'true' : 'false');
+  card.onclick = () => selectAgent(a.id);
+
+  const head = el('div', 'agent-head');
+  head.append(el('span', 'agent-name', a.model));
+  if (!a.installed) head.append(el('span', 'agent-flag', 'not installed'));
+  else if (a.runs) head.append(el('span', 'agent-trail', `${a.runs} run${a.runs === 1 ? '' : 's'}`));
+  card.append(head);
+
+  if (cat.title) {
+    card.append(el('div', 'agent-support',
+      [cat.vendor, cat.title].filter(Boolean).join(' ')));
+  }
+  card.append(el('div', 'agent-desc', cat.description || a.blurb || ''));
+
+  const meta = [
+    cat.context ? `${Math.round(cat.context / 1024)}k context` : null,
+    a.speed,
+    a.profile ? a.profile.label : null,
+    `${a.files} file${a.files === 1 ? '' : 's'}`,
+    `${a.memories} learned`,
+  ].filter(Boolean).join('  ·  ');
+  card.append(el('div', 'agent-meta', meta));
+
+  if (!a.installed) card.append(downloadRow(a, cat));
+  return card;
+}
+
+/* The command to run, one click to copy, plus a link to the model's own page.
+   There used to be a Download button here that posted to the local ollama's
+   /api/pull and streamed progress in place. It was removed: it only works
+   against a real ollama, and anything else answering on that port (an
+   OpenAI-compatible proxy, say) returns 404, so the row's reward for a click
+   was a raw HTTPError quoting a 127.0.0.1 URL at someone who cannot act on it.
+   The command works on every machine and says exactly what it will do. */
+function downloadRow(a, cat) {
+  const row = el('div', 'agent-get');
+  const cmd = cat.pull || `ollama pull ${a.model}`;
+
+  const copy = el('button', 'cmd', '');
+  copy.type = 'button';
+  copy.title = 'Copy this command';
+  copy.append(el('code', null, cmd), el('span', 'cmd-hint', 'copy'));
+  copy.onclick = (e) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(cmd).then(
+      () => { copy.querySelector('.cmd-hint').textContent = 'copied'; },
+      () => { copy.querySelector('.cmd-hint').textContent = 'select it'; });
+    setTimeout(() => { copy.querySelector('.cmd-hint').textContent = 'copy'; }, 1600);
+  };
+  row.append(copy);
+
+  if (cat.url) {
+    const link = el('a', 'agent-link', 'Model page');
+    link.href = cat.url;
+    link.target = '_blank';
+    link.rel = 'noreferrer noopener';
+    link.onclick = (e) => e.stopPropagation();
+    row.append(link);
+  }
+  return row;
+}
+
 function renderAgents() {
   const box = $('agents');
   box.textContent = '';
-  for (const a of S.agents) {
-    const card = el('button', 'agent' + (a.id === S.agent ? ' on' : ''));
-    card.onclick = () => selectAgent(a.id);
+  const q = ($('agent-filter').value || '').trim().toLowerCase();
+  /* Most used first, so the model you reach for is the one at the top. Ties
+     break on the tag rather than on folder order, which is arbitrary. */
+  const ranked = [...S.agents].sort((x, y) =>
+    y.runs - x.runs || x.model.localeCompare(y.model));
+  const shown = ranked.filter((a) => !q ||
+    [a.model, a.name, a.speed, (a.catalog || {}).title, (a.catalog || {}).vendor]
+      .some((f) => String(f || '').toLowerCase().includes(q)));
 
-    const top = el('div', 'agent-top');
-    top.append(el('span', 'agent-size', a.name.replace(/^Agent\s*/, '')),
-               el('span', 'agent-speed', a.speed));
-    card.append(top, el('div', 'agent-model', a.model));
-    if (a.profile) card.append(el('div', 'agent-profile', `⚙ ${a.profile.label}`));
-
-    const stats = el('div', 'agent-stats');
-    stats.append(el('span', null, `${a.runs} run${a.runs === 1 ? '' : 's'}`),
-                 el('span', null, `${a.files} file${a.files === 1 ? '' : 's'}`),
-                 el('span', null, `${a.memories} learned`));
-    card.append(stats, el('div', 'agent-blurb', a.blurb));
-
-    if (!a.installed) {
-      const row = el('div', 'agent-missing');
-      row.append(el('span', null, 'not downloaded'));
-      const btn = el('button', 'ghost small', 'Get it');
-      btn.style.padding = '2px 9px';
-      btn.onclick = (e) => { e.stopPropagation(); pullModel(a, row); };
-      row.append(btn);
-      card.append(row);
-    }
-    box.append(card);
-  }
+  for (const a of shown) box.append(agentRow(a));
+  $('agents-none').classList.toggle('hidden', !!shown.length);
+  /* A filter over three things is furniture. It appears once the list is long
+     enough that finding a model is actually work. */
+  $('rail-search').classList.toggle('hidden', S.agents.length < 6);
+  $('agent-count').textContent = S.agents.length > 1 ? String(S.agents.length) : '';
+  renderAvailable(q);
 }
 
-function pullModel(a, row) {
-  row.textContent = `downloading ${a.model}…`;
-  const bar = el('div', 'pull-bar');
-  const fill = el('i');
-  bar.append(fill);
-  row.after(bar);
-  const es = new EventSource(`/api/pull?model=${encodeURIComponent(a.model)}`);
-  es.onmessage = (e) => {
-    const m = JSON.parse(e.data);
-    if (m.t === 'pull') {
-      const pct = m.total ? (m.completed / m.total) * 100 : 0;
-      fill.style.width = `${pct}%`;
-      row.textContent = `${m.status}${m.total ? ` — ${bytes(m.completed)} / ${bytes(m.total)}` : ''}`;
-    } else if (m.t === 'error') {
-      row.textContent = m.message;
-      es.close();
-    } else if (m.t === 'closed') {
-      es.close();
-      loadAgents(true);
-    }
-  };
-  es.onerror = () => es.close();
+/* Models the catalog knows about that are not installed. Same row shape as an
+   agent, minus the counts it cannot have yet, so the column reads as one list
+   of models rather than two unrelated ones. */
+function renderAvailable(q) {
+  const box = $('available');
+  box.textContent = '';
+  const shown = (S.available || []).filter((m) => !q ||
+    [m.tag, m.title, m.vendor].some((f) => String(f || '').toLowerCase().includes(q)));
+  for (const m of shown) {
+    const row = el('div', 'agent avail');
+    const head = el('div', 'agent-head');
+    head.append(el('span', 'agent-name', m.tag),
+                el('span', 'agent-trail', m.context ? `${Math.round(m.context / 1024)}k` : ''));
+    row.append(head);
+    row.append(el('div', 'agent-support', [m.vendor, m.title].filter(Boolean).join(' ')));
+    row.append(el('div', 'agent-desc avail-desc', m.description || ''));
+    row.append(downloadRow({ model: m.tag }, m));
+    box.append(row);
+  }
+  $('rail-more').classList.toggle('hidden', !shown.length);
 }
 
 async function selectAgent(id) {
@@ -184,11 +210,19 @@ async function selectAgent(id) {
 // decides which installed tag does the talking. Defaults to the model
 // config.json names, and falls back to whatever IS installed so a fresh
 // machine can demo without a 4.7 GB download first.
+const MORE = '__more__';
+
 function renderModels(list) {
   const sel = $('model');
   sel.textContent = '';
   for (const m of list || []) sel.append(new Option(m, m));
   if (!sel.options.length) sel.append(new Option('no models installed', ''));
+  /* The picker is where you go when you want a different model, so it is also
+     where "I want one I do not have" belongs. Choosing it opens the rail
+     rather than changing the model. */
+  const more = new Option('More models…', MORE);
+  more.className = 'opt-more';
+  sel.append(more);
   syncModel();
 }
 
@@ -196,7 +230,7 @@ function syncModel() {
   const sel = $('model');
   const a = S.agents.find((x) => x.id === S.agent);
   if (!a || !sel.options.length) return;
-  const exact = [...sel.options].find((o) => o.value === a.model);
+  const exact = [...sel.options].find((o) => o.value === a.model && o.value !== MORE);
   sel.value = exact ? a.model : sel.options[0].value;
   sel.classList.toggle('substituted', !exact);
   sel.title = exact
@@ -207,10 +241,15 @@ function syncModel() {
 function renderPresets(list) {
   const box = $('presets');
   box.textContent = '';
+  /* One row that scrolls sideways, rather than a block that wraps to five.
+     Six wrapped suggestions took more vertical space than the transcript they
+     sit under and read as the main content of the pane. Shorter labels than
+     the wrapped version carried, since a row is scanned, not read. */
   for (const t of list) {
-    const b = el('button', 'preset', clip(t, 58));
+    const b = el('button', 'preset', clip(t, 44));
+    b.type = 'button';
     b.title = t;
-    b.onclick = () => { $('task').value = t; $('task').focus(); };
+    b.onclick = () => { $('task').value = t; $('task').focus(); growTask(); };
     box.append(b);
   }
 }
@@ -458,6 +497,15 @@ function renderWorkbook(p) {
   return wrap;
 }
 
+/* One place that turns a preview payload into a node, so the full pane, the
+   thumbnail and the modal cannot drift apart. */
+function renderPreview(p) {
+  if (p.kind === 'pptx') return renderDeck(p);
+  if (p.kind === 'xlsx') return renderWorkbook(p);
+  if (p.kind === 'text') return el('div', 'plain', p.text);
+  return el('div', 'plain', `binary file, ${bytes(p.size)} — download to open it`);
+}
+
 async function openFile(name) {
   const url = `/api/download?agent=${S.agent}&name=${encodeURIComponent(name)}`;
   let p;
@@ -467,15 +515,7 @@ async function openFile(name) {
     return openViewer(name, el('div', 'plain', String(err.message)));
   }
   const box = el('div');
-  if (p.kind === 'pptx') {
-    box.append(renderDeck(p));
-  } else if (p.kind === 'xlsx') {
-    box.append(renderWorkbook(p));
-  } else if (p.kind === 'text') {
-    box.append(el('div', 'plain', p.text));
-  } else {
-    box.append(el('div', 'plain', `binary file, ${bytes(p.size)} — download to open it`));
-  }
+  box.append(renderPreview(p));
   openViewer(name, box, url);
 }
 
@@ -483,7 +523,7 @@ async function openLog(name) {
   const log = await api(`/api/log?agent=${S.agent}&name=${encodeURIComponent(name)}`);
   const box = el('div');
   box.append(el('div', 'mail-meta',
-    `${log.model || ''} · ${log.finished ? 'finished' : 'ran out of budget'}${log.summary ? ' · ' + log.summary : ''}`));
+    `${log.model || ''} · ${log.finished ? 'finished' : 'ran out of model calls'}${log.summary ? ' · ' + log.summary : ''}`));
   box.append(el('div', 'mail-body', log.task));
   const pre = el('pre', 'raw');
   pre.textContent = (log.transcript || [])
@@ -493,50 +533,290 @@ async function openLog(name) {
   openViewer(name, box);
 }
 
-/* ----------------------------------------------------------- the stage --- */
+/* ----------------------------------------------- the artifact pane ------ */
+/* The point of this layout: a file lands, it is on screen. No click, no modal,
+   at the size the thing is actually meant to be read at. */
 
-function addCard(cls) {
-  const c = el('div', 'card ' + (cls || ''));
-  $('timeline').append(c);
+/* The All and Workspace tabs exist before anything does. Codex keeps its
+   top-level tabs visible whether or not they have content, so the right side
+   always says what it is for instead of being an unexplained empty box. */
+const panes = {
+  all: { pane: $('pane-all'), tab: null },
+  ws: { pane: $('pane-ws'), tab: null },
+};
+const allCount = el('span', 'count', '0');
+
+function makeTab(label, cls, onSelect) {
+  const tab = el('button', 'tab' + (cls ? ' ' + cls : ''));
+  tab.type = 'button';
+  tab.setAttribute('role', 'tab');
+  tab.append(document.createTextNode(label));
+  tab.onclick = onSelect;
+  $('tabs').append(tab);
+  return tab;
+}
+
+/* A role=tablist promises arrow-key navigation and a roving tabindex: one stop
+   for the whole group, arrows to move within it. Every tab being tabindex 0
+   means Tab walks through all of them, which is the behaviour the role tells
+   screen reader users will not happen. */
+$('tabs').addEventListener('keydown', (ev) => {
+  const tabs = [...$('tabs').querySelectorAll('.tab')];
+  const i = tabs.indexOf(document.activeElement);
+  if (i < 0) return;
+  const to = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: tabs.length - 1 }[ev.key];
+  if (to === undefined) return;
+  ev.preventDefault();
+  const next = tabs[(to + tabs.length) % tabs.length];
+  next.focus();
+  next.click();
+});
+
+panes.all.tab = makeTab('All', null, () => select('all'));
+panes.all.tab.append(allCount);
+panes.ws.tab = makeTab('Workspace', null, () => select('ws'));
+
+function select(name) {
+  for (const [k, v] of Object.entries(panes)) {
+    const on = k === name;
+    v.pane.classList.toggle('on', on);
+    v.tab.classList.toggle('on', on);
+    v.tab.setAttribute('aria-selected', on ? 'true' : 'false');
+    // roving tabindex: the selected tab is the group's single tab stop
+    v.tab.tabIndex = on ? 0 : -1;
+  }
+}
+select('all');   // the All tab reads as selected from the first frame
+
+async function showArtifact(name, stat) {
+  if (panes[name]) {
+    // a rewrite: the caption has to follow, or the All view disagrees with the
+    // chip strip about what the agent just produced
+    if (panes[name].stat) panes[name].stat.textContent = stat || '';
+    return select(name);
+  }
+  let payload;
+  try {
+    payload = await api(`/api/preview?agent=${S.agent}&name=${encodeURIComponent(name)}`);
+  } catch (_) {
+    return;                    // the touched chip already records that it exists
+  }
+  if (panes[name]) return;     // two events for the same file raced here
+
+  $('holding').classList.add('hidden');
+  $('grid-all').classList.remove('hidden');
+  // the first file is the moment the workspace becomes worth looking at
+  setWorkspace(true);
+
+  const pane = el('div', 'pane');
+  // the static panes are marked up as tabpanels; panes built at runtime were
+  // not, so most of the tablist pointed at nothing
+  pane.setAttribute('role', 'tabpanel');
+  pane.setAttribute('aria-label', name);
+  pane.style.padding = '22px 26px';
+  pane.append(renderPreview(payload));
+  $('canvas').append(pane);
+
+  const tab = makeTab(name, 'new', () => select(name));
+
+  /* The same renderers again, into a small box. They size themselves from
+     their container, so there is no separate thumbnail code path to keep in
+     sync with the real one. */
+  const thumb = el('button', 'thumb');
+  thumb.type = 'button';
+  const cap = el('div', 'cap');
+  const capStat = el('span', null, stat || '');
+  cap.append(el('b', null, name), capStat);
+  const shot = el('div', 'shot');
+  shot.append(renderPreview(payload));
+  thumb.append(cap, shot);
+  thumb.onclick = () => select(name);
+  $('grid-all').append(thumb);
+
+  panes[name] = { pane, tab, stat: capStat };
+  const made = Object.keys(panes).length - 2;
+  allCount.textContent = String(made);
+  if (!document.body.classList.contains('ws-open')) {
+    $('ws-count').textContent = String(made);
+    $('ws-count').classList.remove('hidden');
+  }
+  select(name);
+  setTimeout(() => tab.classList.remove('new'), 950);
+}
+
+/* --- what this run touched --- */
+/* Scoped to the run, not the folder: a file the agent never opened is not part
+   of the story being told. Keyed by name, because an agent revising its own
+   deck writes the same file twice and a second chip for it is a lie about how
+   many things it made. */
+const touched = {};
+/* Every product that lists changed files caps the list. Ours appended without
+   a ceiling, so a long run would grow the strip until it pushed the canvas off
+   screen. Measured: at 1440 the strip fits 5 chips per row, at 1280 it fits 4.
+   8 is two rows, and the CSS bounds the strip to two rows independently so a
+   long filename can never push it to three. */
+const TOUCHED_MAX = 8;
+let overflowChip = null;
+
+function addTouched(name, stat) {
+  $('touched-none').classList.add('hidden');
+  let chip = touched[name];
+  if (!chip) {
+    if (Object.keys(touched).length >= TOUCHED_MAX) {
+      if (!overflowChip) {
+        overflowChip = el('span', 'more', '');
+        $('touched').append(overflowChip);
+      }
+      touched[name] = null;                       // counted, not drawn
+      overflowChip.textContent = `+${Object.keys(touched).length - TOUCHED_MAX} more`;
+      return;
+    }
+    chip = el('button', 'chip');
+    chip.type = 'button';
+    chip.append(el('span', 'nm', name), el('span', 'add', ''));
+    chip.onclick = () => panes[name] ? select(name) : openFile(name);
+    $('touched').append(chip);
+    touched[name] = chip;
+  }
+  if (!chip) return;                              // an overflowed file, rewritten
+  chip.querySelector('.add').textContent = stat || '';
+  chip.classList.remove('fresh');
+  void chip.offsetWidth;           // restart the animation on a rewrite
+  chip.classList.add('fresh');
+  setTimeout(() => chip.classList.remove('fresh'), 950);
+}
+
+/* The runner already tells us how big the thing it made is, so showing it here
+   beats leaving it buried in the arguments. */
+function statFor(e) {
+  const a = e.args || {};
+  if (Array.isArray(a.rows)) return `+${a.rows.length} rows`;
+  if (Array.isArray(a.slides)) return `+${a.slides.length} slides`;
+  return '';
+}
+
+/* ------------------------------------------------------- the timeline --- */
+
+const feed = $('timeline');
+function push(cls) {
+  const n = el('div', 'ev ' + (cls || ''));
+  feed.append(n);
   autoscroll();
-  return c;
-}
-function head(card, who, chips, meta) {
-  const h = el('div', 'card-head');
-  h.append(el('span', 'who', who));
-  (chips || []).forEach((c) => h.append(el('span', 'chip ' + (c.cls || ''), c.text)));
-  h.append(el('span', 'spacer'));
-  const m = el('span', 'meta', meta || '');
-  h.append(m);
-  card.append(h);
-  return m;
-}
-function autoscroll() {
-  const t = $('timeline');
-  if (t.scrollHeight - t.scrollTop - t.clientHeight < 220) t.scrollTop = t.scrollHeight;
+  return n;
 }
 
-function clearStage() {
-  $('timeline').textContent = '';
-  $('empty').classList.add('hidden');
-  S.call = null;
+/* Only auto-scroll when the viewport is already within 100px of the bottom.
+   Before this, every event yanked the pane down, so you could not read back
+   through a run while it was still going. Scroll up once and the feed leaves
+   you alone until you return to the bottom yourself. */
+const STICK_PX = 100;
+function autoscroll() {
+  const f = feed.parentElement;
+  if (f.scrollHeight - f.scrollTop - f.clientHeight <= STICK_PX) {
+    f.scrollTop = f.scrollHeight;
+  }
 }
+
+/* The clock stops when the run does. It used to be a bare setInterval that was
+   only cleared on finishRun, so a stream that ended without closing kept
+   counting: a screenshot twenty minutes later read "1270s" for an 11-second
+   run. A number that keeps moving after the thing it measures has stopped is
+   worse than no number. */
+const paintClock = () =>
+  $('time-val').textContent = `${Math.round((Date.now() - S.t0) / 1000)}s`;
+function startClock() {
+  stopClock();
+  S.t0 = Date.now();
+  paintClock();
+  S.timer = setInterval(paintClock, 250);
+}
+function stopClock() {
+  if (S.timer) { clearInterval(S.timer); S.timer = null; }
+  paintClock();                       // land on the true final value
+}
+
+function meters(c, budget) {
+  const box = $('meter-calls');
+  $('calls-val').textContent = `${c}/${budget}`;
+  const r = budget ? c / budget : 0;
+  $('calls-bar').style.transform = `scaleX(${r})`;
+  // classList, not className: assigning the whole string used to drop the
+  // layout classes the moment a run crossed a threshold
+  box.classList.toggle('warn', r > 0.7 && r <= 0.9);
+  box.classList.toggle('bad', r > 0.9);
+}
+
+/* Finding 7. The plan arrives once, as lines like "1. read_email - get the Q3
+   numbers". Only the tool name is kept: the prose after it repeats what the
+   timeline is about to say anyway, and this strip has to stay one or two rows
+   tall beside the Steps only button. */
+let planSteps = [];
+let planCursor = -1;   // index of the furthest step reached so far
+function drawPlan(content) {
+  /* Idempotent: clear before drawing. Appending meant a second plan event
+     duplicated the whole strip, and the harness can legitimately emit one
+     again after a failure. A step already spent must never reappear. */
+  $('plan').textContent = '';
+  planCursor = -1;
+  planSteps = String(content).split('\n').filter(Boolean).map((line) => {
+    const m = line.match(/^\d+\.\s*(\S+)/);
+    const node = el('span', 'step', m ? m[1] : clip(line, 28));
+    node.title = line;
+    $('plan').append(node);
+    return { tool: m ? m[1] : null, node, done: false };
+  });
+  if (planSteps[0]) planSteps[0].node.classList.add('now');
+}
+
+/* The pointer only moves forward. A real run showed why: the model skipped
+   step 3, completed 4 and 5, and "now" walked backwards onto the skipped step,
+   so a finished plan pointed at something it had already moved past. A step
+   the run overtook is not what happens next, it is a step that did not happen,
+   so it goes quiet rather than reclaiming the cursor. */
+function advancePlan(tool) {
+  const i = planSteps.findIndex((s) => !s.done && s.tool === tool);
+  if (i < 0) return;                       // an unplanned call: leave the plan alone
+  planSteps[i].done = true;
+  planSteps[i].node.classList.remove('now');
+  planSteps[i].node.classList.add('done');
+  if (i > planCursor) planCursor = i;
+  for (const s of planSteps) s.node.classList.remove('now');
+  const next = planSteps.find((s, j) => !s.done && j > planCursor);
+  if (next) next.node.classList.add('now');
+}
+
+/* Nothing is "next" once the run is over. Without this the strip kept a live
+   pointer on a finished run. */
+function endPlan() {
+  for (const s of planSteps) s.node.classList.remove('now');
+}
+
+/* --- events ------------------------------------------------------------ */
 
 function onBanner(e) {
-  const card = addCard('banner');
-  head(card, e.name, [{ text: e.model, cls: 'role-driver' },
-                      { text: `${e.budget} call budget` },
-                      { text: e.toolset }]);
-  card.append(el('div', 'banner-title', e.task));
+  resetRun();
+  meters(0, e.budget);
+  const n = push('act');
+  n.append(el('div', 'banner-task', e.task));
 
+  /* One line of facts, not a wall. This used to print five run chips followed
+     by eight harness knobs, thirteen boxes stacked three rows deep above the
+     first thing the model said. The run line keeps what changes between runs;
+     the harness settings are fixed configuration and live behind the
+     disclosure that was already there to explain them. */
   const p = e.profile;
+  const facts = [e.model, `${e.budget} calls`, e.toolset];
+  if (p) facts.push(p.label);
+  if (e.root) facts.push(`folder: ${e.root}`);
+  if (e.yolo) facts.push('confirmations off');
+  if (e.tiers) facts.push(`tiers: ${Object.values(e.tiers.roles).join(', ')}`);
+  n.append(el('div', 'banner-facts', facts.join('  ·  ')));
+
   if (p) {
+    const det = el('details', 'harness-why');
+    det.append(el('summary', null, 'harness settings'));
     const hz = el('div', 'harness-strip');
-    hz.append(el('span', 'harness-name', `⚙ ${p.label}`));
-    const knob = (on, label) => {
-      const s = el('span', 'knob' + (on ? ' on' : ' off'), label);
-      return s;
-    };
+    const knob = (on, label) => el('span', 'knob' + (on ? ' on' : ' off'), label);
     hz.append(knob(p.plan, p.plan ? `plan ≤${p.plan_max_steps}` : 'no plan'),
               knob(p.verify_rounds > 0, p.verify_rounds ? `verify ×${p.verify_rounds}` : 'no verify'),
               knob(p.loop_break, p.loop_break ? 'loop-break' : 'loops ok'),
@@ -544,220 +824,322 @@ function onBanner(e) {
               knob(true, `ctx ${(p.num_ctx / 1024).toFixed(0)}k`),
               knob(true, `think ≤${p.think_streak_cap}`),
               knob(true, `mem ${p.memory_k}`));
-    card.append(hz);
-    if (p.rationale) {
-      const det = el('details', 'harness-why');
-      det.append(el('summary', null, 'why this harness for this model'),
-                 el('div', 'note-text', p.rationale));
-      card.append(det);
-    }
+    det.append(hz);
+    if (p.rationale) det.append(el('div', 'note', p.rationale));
+    det.append(el('div', 'note', `${e.today} · ${e.endpoint}`));
+    n.append(det);
   }
+  S.banner = n;
+}
 
-  const grid = el('div', 'banner-grid');
-  grid.append(el('span', 'chip', `today: ${e.today}`),
-              el('span', 'chip', e.endpoint));
-  if (e.root) grid.append(el('span', 'chip', `real folder: ${e.root}`));
-  if (e.mcp) {
-    for (const s of e.mcp.servers) {
-      const c = el('span', 'chip real', `${s.id}: ${s.tools.length} tools`);
-      grid.append(c);
-    }
-    grid.append(el('span', 'chip real' + (e.mcp.mode === 'live' ? ' hot' : ''),
-                   e.mcp.mode === 'draft' ? 'draft — cannot send' : e.mcp.mode));
-    for (const w of e.mcp.warnings || []) grid.append(el('span', 'chip hot', w));
-  }
-  if (e.yolo) grid.append(el('span', 'chip', 'confirmations off'));
-  if (e.tiers) grid.append(el('span', 'chip', `tiers: ${Object.values(e.tiers.roles).join(', ')}`));
-  card.append(grid);
-  S.banner = card;
-  $('calls-val').textContent = `0/${e.budget}`;
+/* A disclosure that keeps the long text out of the flow but never out of
+   reach. Two callers wanted the same thing with different bodies. */
+function details(label, text, cls) {
+  const det = el('details');
+  det.append(el('summary', null, label));
+  det.append(cls === 'note' ? el('div', 'note', text) : (() => {
+    const pre = el('pre', 'raw');
+    pre.textContent = text;
+    return pre;
+  })());
+  return det;
+}
+
+/* The model speaks JSON, but its `thought` field is the only part a person
+   wants. Pulling the field out of a half-written object means the sentence can
+   stream as it is written, without the braces and quoting around it ever
+   reaching the screen. */
+const THOUGHT_RE = /"(?:thought|reasoning)"\s*:\s*"((?:[^"\\]|\\.)*)/;
+function liveThought(raw) {
+  const m = raw.match(THOUGHT_RE);
+  if (!m) return null;
+  // a fragment can end mid-escape, which is not parseable; drop the dangling
+  // backslash and let the next token complete it
+  const body = m[1].replace(/\\$/, '');
+  try { return JSON.parse('"' + body + '"'); }
+  catch (_) { return body.replace(/\\n/g, '\n').replace(/\\"/g, '"'); }
 }
 
 function onCallStart(e) {
-  const card = addCard('call streaming');
-  const meta = head(card, 'model', [
-    { text: e.role, cls: 'role-' + e.role },
-    { text: e.model },
-  ], `call ${e.call}/${e.budget}`);
-  const dots = el('div', 'dots');
-  dots.append(el('i'), el('i'), el('i'));
-  const stream = el('pre', 'stream');
-  card.append(dots, stream);
-  S.call = { card, stream, meta, dots, role: e.role, text: '' };
-  $('calls-val').textContent = `${e.call}/${e.budget}`;
-  $('calls-bar').style.width = `${(e.call / e.budget) * 100}%`;
+  const n = push('');
+  // Until a thought appears there is nothing worth reading, so the row says it
+  // is working rather than showing an object being assembled.
+  const body = el('div', 'thinking', 'Thinking');
+  n.append(body);
+  S.call = { node: n, body, text: '' };
+  meters(e.call, e.budget);
 }
 
 function onToken(e) {
   if (!S.call) return;
   S.call.text += e.text;
-  S.call.stream.textContent = S.call.text;
-  S.call.stream.scrollTop = S.call.stream.scrollHeight;
+  const t = liveThought(S.call.text);
+  if (t) {
+    S.call.body.className = 'think';
+    S.call.body.textContent = t;
+  }
   autoscroll();
 }
 
-function onCallEnd(e) {
+/* Every path that ends a call has to land the row in a readable state, or it
+   shimmers "Thinking" forever. This is the one place that does it. */
+function settleCall(text, raw) {
   if (!S.call) return;
-  S.call.card.classList.remove('streaming');
-  S.call.dots.remove();
-  S.call.meta.textContent = `${(e.ms / 1000).toFixed(1)}s · ${e.output_tokens} tokens`;
-  $('tok-val').textContent = (+$('tok-val').textContent + e.output_tokens);
-}
-
-function onPlan(content) {
-  const card = S.call ? S.call.card : addCard('call');
-  if (S.call) S.call.stream.remove();
-  const list = el('ul', 'plan');
-  const steps = String(content).split('\n').filter(Boolean);
-  if (!steps.length) {
-    card.append(el('div', 'thought quiet', 'no usable plan — going straight to the first call'));
-  } else {
-    steps.forEach((s) => {
-      const li = el('li');
-      const m = s.match(/^\d+\.\s*(\S+)\s*-\s*(.*)$/);
-      li.append(el('code', null, m ? m[1] : s));
-      if (m && m[2]) li.append(el('span', null, m[2]));
-      list.append(li);
-    });
-    card.append(el('div', 'thought quiet', 'planned tool sequence'), list);
-  }
+  S.call.body.className = text ? 'think' : 'think quiet';
+  S.call.body.textContent = text || 'no reasoning given';
+  if (raw) S.call.node.append(details('raw reply', raw));
+  S.call.node.classList.add('settled');
   S.call = null;
 }
 
+function onCallEnd(e) {
+  $('tok-val').textContent = (+$('tok-val').textContent + e.output_tokens);
+  if (S.call) {
+    S.call.node.append(el('div', 'when',
+      `${(e.ms / 1000).toFixed(1)}s · ${e.output_tokens} tokens`));
+  }
+}
+
+/* The parsed thought replaces the streamed one. They are usually identical, but
+   the streamed version came out of a half-written object and the parsed one is
+   authoritative. The JSON stays reachable as evidence, collapsed. */
 function onModelReply(content) {
-  const card = S.call ? S.call.card : addCard('call');
+  if (!S.call) return;
   let obj = null;
   try { obj = JSON.parse(content); } catch (_) { /* the harness will repair it */ }
-  if (S.call) {
-    S.call.stream.remove();
-    const thought = obj && (obj.thought || obj.reasoning);
-    if (thought) card.append(el('div', 'thought', String(thought)));
-    else if (!obj) card.append(el('div', 'thought quiet', 'reply was not valid JSON'));
-    const det = el('details');
-    det.append(el('summary', null, 'raw reply'));
-    const pre = el('pre', 'raw');
-    pre.textContent = content;
-    det.append(pre);
-    det.querySelector('summary').style.cssText = 'cursor:pointer;font-size:10.5px;color:var(--ink-faint);margin-top:8px';
-    card.append(det);
-  }
-  S.call = null;
+  const thought = obj && (obj.thought || obj.reasoning);
+  settleCall(thought ? String(thought) : (obj ? '' : 'reply was not valid JSON'), content);
 }
 
-function onTool(e) {
-  const err = !e.ok;
-  const card = addCard('tool' + (err ? ' err' : '') + (e.name === 'think' ? ' think' : ''));
-  const h = el('div', 'card-head');
-  h.append(el('span', 'ico', TOOL_ICON[e.name] || '🔧'),
-           el('span', 'tool-name', e.name));
-  h.append(el('span', 'spacer'), el('span', 'meta', err ? 'error' : 'ok'));
-  h.querySelector('.ico').style.marginRight = '2px';
-  card.append(h);
-
-  const args = el('div', 'args');
-  for (const [k, v] of Object.entries(e.args || {})) {
-    const row = el('div', 'arg');
-    const val = typeof v === 'string' ? v : JSON.stringify(v);
-    row.append(el('span', 'k', k + ':'), el('span', 'v', clip(val, 400)));
-    args.append(row);
-  }
-  if (args.children.length) card.append(args);
-  if (e.name !== 'think') {
-    card.append(el('div', 'result ' + (err ? 'err' : 'ok'), clip(e.result, 1200)));
-  }
-}
+let doneSummary = null;
 
 function onNote(e) {
   const k = e.kind;
   if (k === 'system') {
-    if (!S.banner) return;
-    const det = el('details');
-    det.append(el('summary', null, 'the prompt the harness built'));
-    const pre = el('pre', 'raw');
-    pre.textContent = e.content;
-    det.append(pre);
-    S.banner.append(det);
+    if (S.banner) S.banner.append(details('the prompt the harness built', e.content));
     return;
   }
-  if (k === 'task' || k === 'observation') return;   // shown by the banner / tool card
-  if (k === 'plan') return onPlan(e.content);
+  if (k === 'task' || k === 'observation') return;   // shown by the banner / tool row
+  /* The plan call has to settle its row too. It did not, so the row that
+     produced the plan kept whatever the model had streamed into it: a raw
+     {"steps": [...]} object sitting at the top of every run forever. The plan
+     strip already shows the steps, so the row only reports that it planned. */
+  if (k === 'plan') {
+    drawPlan(e.content);
+    const n = planSteps.length;
+    settleCall(`Planned ${n} step${n === 1 ? '' : 's'}.`, e.content);
+    return;
+  }
   if (k === 'model') return onModelReply(e.content);
 
   if (k === 'repair') {
-    const c = addCard('note repair');
-    c.append(el('div', 'tag', 'harness repaired the call'), el('div', 'note-text', e.content));
+    const d = el('div', 'note');
+    d.append(el('b', null, 'harness repaired the call'),
+             document.createTextNode(' · ' + e.content));
+    push('').append(d);
     return;
   }
+  /* The harness correcting the model is the recovery half of a failure.
+     Without it the timeline shows a tool failing and then, unexplained, the
+     same tool working, which reads as luck rather than as a system. */
   if (k === 'feedback') {
-    const c = addCard('note feedback');
-    c.append(el('div', 'tag', 'harness → model'), el('div', 'note-text', e.content));
+    const d = el('div', 'note');
+    d.append(el('b', null, 'harness → model'), document.createTextNode(' · ' + e.content));
+    push('act').append(d);
     return;
   }
   if (k === 'verify') {
     let v = {};
     try { v = JSON.parse(e.content); } catch (_) { /* keep the raw text */ }
     const ok = v.complete !== false;
-    const c = addCard('note ' + (ok ? 'verify' : 'feedback'));
-    c.append(el('div', 'tag', ok ? 'verifier: complete' : 'verifier: not done'),
-             el('div', 'note-text', ok ? 'every requirement checks out against the action log'
-                                       : `missing: ${v.missing || e.content}`));
+    const d = el('div', 'note');
+    /* The verifier fails open so a broken one cannot trap the agent, but that
+       makes a failure look exactly like a pass. When the harness marks the
+       verdict unverified, say so rather than claiming the run checks out. */
+    if (ok && v.unverified) {
+      d.append(el('b', 'warn-tag', 'not verified'),
+               document.createTextNode(' · ' + v.unverified));
+      push('').append(d);
+      return;
+    }
+    d.append(el('b', ok ? 'good-tag' : 'bad-tag',
+                ok ? 'verified complete' : 'verifier: not done'));
+    if (!ok) d.append(document.createTextNode(' · ' + (v.missing || e.content)));
+    push(ok ? 'made' : 'bad').append(d);
     return;
   }
-  if (k === 'done') {
-    const c = addCard('done');
-    c.append(el('div', 'tag', 'done'), el('div', 'note-text', e.content || '(no summary)'));
-    c.querySelector('.tag').style.color = 'var(--good)';
-  }
+  /* Held, not drawn. The `done` note and the `end` event both carry a sentence
+     about the same run, and rendering both produced two near-identical
+     paragraphs in a row. They belong in one card. */
+  if (k === 'done') doneSummary = e.content;
+}
+
+function onTool(e) {
+  if (e.name === 'think') return;
+  const mut = MUTATORS.has(e.name);
+  /* A failed mutator used to get the green "made" dot, so a create_deck that
+     wrote nothing looked exactly like one that worked. Failure outranks
+     intent: the dot follows what happened, not what was attempted. */
+  if (e.ok) advancePlan(e.name);   // a failed call has not completed its step
+  /* has-tool is what "Steps only" filters on: this event carries an action,
+     so it survives the strip. */
+  const n = push((!e.ok ? 'bad' : mut ? 'made' : 'act') + ' has-tool');
+
+  const row = el('div', 'tool' + (e.ok ? '' : ' err'));
+  const arg = Object.values(e.args || {})[0];
+  row.append(el('span', 'nm', e.name),
+             el('span', 'arg', arg == null ? '' : clip(typeof arg === 'string' ? arg : JSON.stringify(arg), 90)),
+             el('span', 'out', e.ok ? (mut ? 'written' : 'completed') : 'failed'));
+  n.append(row);
+  /* Why it failed is the whole point of showing the failure. */
+  if (!e.ok) n.append(el('div', 'reason', clip(e.result, 600)));
+
+  if (!e.ok) return;
+  const key = TOUCH_ARG[e.name];
+  const name = key && e.args ? e.args[key] : null;
+  if (!name) return;
+  const stat = statFor(e);
+  addTouched(name, stat);
+  if (ARTIFACT_ARG[e.name]) showArtifact(name, stat);
 }
 
 function onConfirm(e) {
-  const card = addCard('confirm');
-  card.append(el('div', 'tag', `the agent wants to ${e.action}`),
-              el('div', 'note-text', e.detail));
+  const n = push('act');
+  const box = el('div', 'confirm-box');
+  box.append(el('div', 'tag', `the agent wants to ${e.action}`),
+             el('div', 'note', e.detail));
   const row = el('div', 'confirm-actions');
   const allow = el('button', 'allow', 'Allow');
   const deny = el('button', 'deny', 'Deny');
   const answer = (ok) => {
     post('/api/confirm', { id: e.id, allow: ok }).catch(() => {});
-    card.classList.add('answered');
+    box.classList.add('answered');
     row.textContent = '';
-    row.append(el('div', 'note-text', ok ? 'you allowed it' : 'you declined it'));
+    row.append(el('div', 'note', ok ? 'you allowed it' : 'you declined it'));
   };
   allow.onclick = () => answer(true);
   deny.onclick = () => answer(false);
   row.append(allow, deny);
-  card.append(row);
+  box.append(row);
+  n.append(box);
   autoscroll();
 }
 
+/* The run already emitted a summary twice — a `done` note and an `end` event —
+   both rendered as ordinary rows in the same type as everything else, so the
+   conclusion read as two more log lines. A run needs a full stop: one card,
+   answering what it did and what it made. Bounded, not a dump. */
 function onEnd(e) {
-  const card = addCard(e.finished ? 'done' : 'note');
-  head(card, e.finished ? 'run complete' : 'run stopped at the budget', []);
-  if (e.summary) card.append(el('div', 'note-text', e.summary));
-  const grid = el('div', 'summary-grid');
-  const stat = (v, l) => {
-    const s = el('div', 'stat');
-    s.append(el('b', null, String(v)), el('span', null, l));
-    return s;
+  stopClock();
+  endPlan();
+  // a call still open at the end would shimmer "Thinking" on a finished run
+  settleCall('', S.call ? S.call.text : '');
+  const n = push(e.finished ? 'made' : 'bad');
+  const card = el('div', 'endcard' + (e.finished ? '' : ' cut'));
+
+  /* "Budget" is vague: it reads as money or tokens. What actually ends a run
+     is MAX_CALLS, a cap on model calls. Tokens are capped per-call by
+     num_predict and bounded by num_ctx, but neither stops a run, so naming
+     tokens here would describe a mechanism the harness does not have. */
+  card.append(el('div', 'endhead', e.finished ? 'Run complete' : 'Out of model calls'));
+
+  // what it did: the model's own sentence, not the harness's tally
+  const say = doneSummary || e.summary;
+  if (say) card.append(el('div', 'endsay', say));
+
+  /* What it made. The timeline says a file was written and then scrolls away;
+     this is the only place the outputs are listed together, and each one is
+     the same click as its tab. */
+  const made = Object.keys(panes).filter((k) => k !== 'all' && k !== 'ws');
+  if (made.length) {
+    const box = el('div', 'endmade');
+    box.append(el('div', 'endlabel', 'produced'));
+    for (const name of made) {
+      const row = el('button', 'endfile');
+      row.type = 'button';
+      row.append(el('span', 'nm', name),
+                 el('span', 'add', panes[name].stat ? panes[name].stat.textContent : ''));
+      row.onclick = () => select(name);
+      box.append(row);
+    }
+    card.append(box);
+  }
+
+  const stats = el('div', 'endstats');
+  const stat = (v, l, bad) => {
+    const d = el('div', bad ? 'bad-stat' : null);
+    d.append(el('b', null, String(v)), el('span', null, l));
+    return d;
   };
-  grid.append(stat(`${e.calls}/${e.budget}`, 'llm calls'),
-              stat(`${e.wall}s`, 'model time'),
-              stat(e.output_tokens, 'tokens out'),
-              stat(e.actions.length, 'actions'),
-              stat(e.tool_errors, 'tool errors'),
-              stat(e.parse_failures + e.invalid_calls, 'bad replies'));
-  card.append(grid);
-  if (e.log) card.append(el('div', 'note-text', `transcript saved to ${e.log}`));
+  const plural = (nn, word) => `${word}${nn === 1 ? '' : 's'}`;
+  /* calls first, flagged red when they are what stopped the run, because the
+     stat that ended the run should be the one the eye lands on */
+  stats.append(stat(`${e.calls}/${e.budget}`, 'model calls', !e.finished),
+               stat(e.output_tokens, 'tokens out'),
+               stat(`${e.wall}s`, 'model time'),
+               stat(e.actions.length, plural(e.actions.length, 'action')));
+  if (e.tool_errors) {
+    stats.append(stat(e.tool_errors, plural(e.tool_errors, 'tool error'), true));
+  }
+  const badReplies = e.parse_failures + e.invalid_calls;
+  if (badReplies) stats.append(stat(badReplies, plural(badReplies, 'bad reply'), true));
+  card.append(stats);
+
+  /* Its own class, not .endlabel: that one uppercases, which turned a
+     case-sensitive path into AGENTS/8B/LOGS/RUN_003.JSON. */
+  if (e.log) {
+    const f = el('div', 'endfoot');
+    f.append(el('span', null, 'Transcript'), el('code', null, e.log));
+    card.append(f);
+  }
+  n.append(card);
 }
 
 function onError(e) {
-  const card = addCard('note bad');
-  card.append(el('div', 'tag', 'error'), el('div', 'note-text', e.message));
+  const n = push('bad');
+  const d = el('div', 'note');
+  d.append(el('b', 'bad-tag', 'error'), document.createTextNode(' ' + e.message));
+  n.append(d);
   if (e.trace) {
-    const pre = el('pre', 'raw');
-    pre.textContent = e.trace;
-    card.append(pre);
+    const det = details('traceback', e.trace);
+    det.className = 'trace';
+    n.append(det);
   }
+}
+
+/* One place that knows everything a run accumulates. Anything added to that
+   list later has to be cleared here too, which is why it is one function
+   rather than scattered resets. Without it a second Run stacks on the first:
+   the plan strip doubles, spent steps reappear, artifact tabs pile up. */
+function resetRun() {
+  feed.textContent = '';
+  $('empty').classList.add('hidden');
+  $('plan').textContent = '';
+  planSteps = [];
+  planCursor = -1;
+  S.call = null;
+  S.banner = null;
+  doneSummary = null;
+  $('tok-val').textContent = '0';
+  startClock();
+
+  for (const k of Object.keys(panes)) {
+    if (k === 'all' || k === 'ws') continue;
+    panes[k].pane.remove();
+    panes[k].tab.remove();
+    delete panes[k];
+  }
+  $('grid-all').textContent = '';
+  $('grid-all').classList.add('hidden');
+  $('holding').classList.remove('hidden');
+  allCount.textContent = '0';
+  $('ws-count').classList.add('hidden');
+  select('all');
+
+  for (const k of Object.keys(touched)) delete touched[k];
+  if (overflowChip) { overflowChip.remove(); overflowChip = null; }
+  $('touched').querySelectorAll('.chip').forEach((c) => c.remove());
+  $('touched-none').classList.remove('hidden');
 }
 
 /* ---------------------------------------------------------------- run --- */
@@ -795,12 +1177,11 @@ async function startRun() {
     mcp: mcpSelected(),
     mcp_mode: $('opt-mcp-mode').value,
   };
-  clearStage();
+  resetRun();
   let res;
   try {
     res = await post('/api/run', body);
   } catch (err) {
-    $('empty').classList.add('hidden');
     return onError({ message: err.message });
   }
   S.run = res.run;
@@ -808,12 +1189,7 @@ async function startRun() {
   S.first = false;
   $('run').disabled = true;
   $('stop').classList.remove('hidden');
-  $('tok-val').textContent = '0';
   ['meter-calls', 'meter-time', 'meter-tok'].forEach((id) => $(id).classList.remove('hidden'));
-  S.t0 = Date.now();
-  S.timer = setInterval(() => {
-    $('time-val').textContent = `${Math.round((Date.now() - S.t0) / 1000)}s`;
-  }, 500);
 
   S.es = new EventSource(`/api/events?run=${S.run}`);
   S.es.onmessage = (m) => handle(JSON.parse(m.data));
@@ -822,7 +1198,7 @@ async function startRun() {
 
 function finishRun() {
   if (S.es) { S.es.close(); S.es = null; }
-  if (S.timer) { clearInterval(S.timer); S.timer = null; }
+  stopClock();
   S.run = null;
   S.call = null;
   $('run').disabled = false;
@@ -830,6 +1206,219 @@ function finishRun() {
   loadAgents(true);
   loadWorkspace();
 }
+
+/* --------------------------------------------------------------- chrome -- */
+
+/* An explicit choice, stored, beating the OS preference in both directions. No
+   attribute at all means "follow the OS", which is the right default and is
+   what a first-time visitor gets. */
+const themeBtn = $('theme');
+const isDark = () => {
+  const set = document.documentElement.getAttribute('data-theme');
+  return set ? set === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+};
+const paintTheme = () => {
+  // the drawn mark stays; only the label changes, and it names the action
+  themeBtn.title = isDark() ? 'Switch to light' : 'Switch to dark';
+  themeBtn.setAttribute('aria-label', themeBtn.title);
+};
+try {
+  const saved = localStorage.getItem('agentlab-theme');
+  if (saved) document.documentElement.setAttribute('data-theme', saved);
+} catch (_) { /* storage blocked; the OS default still works */ }
+themeBtn.onclick = () => {
+  const next = isDark() ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  try { localStorage.setItem('agentlab-theme', next); } catch (_) {}
+  paintTheme();
+};
+// follow the OS while the user has not overridden it
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', paintTheme);
+paintTheme();
+
+/* Ratio, not pixels: a pixel width would mean the split silently changes
+   meaning when the window resizes. Percent keeps the user's intent ("show me
+   more of the run") true at any size. */
+const splitter = $('splitter');
+const MIN_PCT = 24, MAX_PCT = 68;
+
+function setSplit(pct) {
+  const v = Math.min(MAX_PCT, Math.max(MIN_PCT, pct));
+  document.documentElement.style.setProperty('--run-pct', v + '%');
+  splitter.setAttribute('aria-valuenow', Math.round(v));
+  try { localStorage.setItem('agentlab-split', String(v)); } catch (_) {}
+}
+try {
+  const saved = parseFloat(localStorage.getItem('agentlab-split'));
+  if (!Number.isNaN(saved)) setSplit(saved);
+} catch (_) {}
+
+splitter.addEventListener('pointerdown', (ev) => {
+  ev.preventDefault();
+  splitter.setPointerCapture(ev.pointerId);   // keep tracking outside the 6px
+  splitter.classList.add('dragging');
+  document.body.classList.add('resizing');
+  const rect = document.querySelector('.body').getBoundingClientRect();
+  const move = (m) => setSplit(((m.clientX - rect.left) / rect.width) * 100);
+  const up = () => {
+    splitter.classList.remove('dragging');
+    document.body.classList.remove('resizing');
+    splitter.removeEventListener('pointermove', move);
+    splitter.removeEventListener('pointerup', up);
+    splitter.removeEventListener('pointercancel', up);
+  };
+  splitter.addEventListener('pointermove', move);
+  splitter.addEventListener('pointerup', up);
+  splitter.addEventListener('pointercancel', up);
+});
+
+/* A separator that only responds to a mouse is not a control. Arrows nudge,
+   Home/End jump to the limits, and double-click resets to the default rather
+   than leaving the user to hunt for it. */
+splitter.addEventListener('keydown', (ev) => {
+  const now = parseFloat(splitter.getAttribute('aria-valuenow'));
+  const to = { ArrowLeft: now - 2, ArrowRight: now + 2,
+               Home: MIN_PCT, End: MAX_PCT }[ev.key];
+  if (to === undefined) return;
+  ev.preventDefault();
+  setSplit(to);
+});
+splitter.addEventListener('dblclick', () => setSplit(50));
+
+/* --- run options --------------------------------------------------------- */
+/* The popover floats over the transcript, so the feed has to know how tall the
+   dock is or the last events sit underneath it unreachable. Measured rather
+   than assumed, because the field grows with the task text. */
+const dockEl = document.querySelector('.dock');
+new ResizeObserver(([entry]) => {
+  document.documentElement.style.setProperty('--dock-h', entry.contentRect.height + 'px');
+}).observe(dockEl);
+
+const optsBtn = $('opts-btn'), optsBox = $('opts');
+function setOpts(open) {
+  optsBox.hidden = !open;
+  optsBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (open) optsBox.querySelector('input').focus();
+}
+optsBtn.onclick = (e) => { e.stopPropagation(); setOpts(optsBox.hidden); };
+// click-away and Escape, because a popover you can only close with the button
+// that opened it is a trap
+document.addEventListener('click', (e) => {
+  if (!optsBox.hidden && !optsBox.contains(e.target) && e.target !== optsBtn) setOpts(false);
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !optsBox.hidden) { setOpts(false); optsBtn.focus(); }
+});
+
+/* ----------------------------------------------- real accounts (mcp) --- */
+
+/* The registry, fetched once — mcp/servers.json is static for the life of the
+   process. Rows reuse .menu-row so a server reads as one more switch in the
+   menu rather than a form bolted into it. */
+async function loadMcp() {
+  let servers;
+  try {
+    servers = await api('/api/mcp');
+  } catch (err) {
+    return;                       // no registry is not a reason to break the menu
+  }
+  const box = $('opt-mcp');
+  box.textContent = '';
+  for (const s of servers) {
+    // Built as nodes, not markup: the setup text goes into a title attribute and
+    // esc() only covers &<>, so a quote in servers.json would break out of it.
+    const row = el('label', 'menu-row mcp-row');
+    row.title = s.setup;
+    const cb = el('input');
+    cb.type = 'checkbox';
+    cb.className = 'mcp-server';
+    cb.value = s.name;
+    const label = el('span', 'menu-label', s.name);
+    label.append(el('em', null, s.summary));
+    const tick = el('span', 'tick', '✓');
+    tick.setAttribute('aria-hidden', 'true');
+    row.append(cb, label, tick);
+    box.append(row);
+  }
+  paintOptDots();
+}
+
+function mcpSelected() {
+  return [...document.querySelectorAll('.mcp-server:checked')].map((el) => el.value);
+}
+
+/* The popover closes and takes any memory of what is switched on with it, so
+   the count stays behind on the bar. */
+const OPT_LABELS = { 'opt-shell': 'shell', 'opt-yolo': 'no confirm',
+                     'opt-office': 'office', 'opt-tiers': 'tiers' };
+function paintOptDots() {
+  const on = Object.keys(OPT_LABELS).filter((id) => $(id).checked).map((id) => OPT_LABELS[id]);
+  const root = $('opt-root').value.trim();
+  const calls = $('opt-calls').value.trim();
+  if (root) on.unshift('folder');
+  if (calls) on.push(`${calls} calls`);
+  /* Real accounts lead the summary. Everything else here changes how the agent
+     works; this is the only one that decides whether it can touch live mail. */
+  const conn = mcpSelected();
+  const mode = $('opt-mcp-mode').value;
+  if (conn.length) on.unshift(mode === 'live' ? `${conn.length} live` : `${conn.length} real`);
+  $('conn-state').textContent = conn.length
+    ? `${conn.length} · ${mode === 'read_only' ? 'read only' : mode}` : 'none';
+  $('conn-state').classList.toggle('hot', conn.length > 0 && mode === 'live');
+  $('opt-dots').textContent = on.join(' · ');
+  /* The two rows that take a value show it on the row, so the menu still reads
+     as set or unset once it is closed and reopened. */
+  $('root-val').textContent = root ? root.replace(/^.*\//, '') || root : 'simulated';
+  $('calls-set').textContent = calls || 'auto';
+}
+optsBox.addEventListener('input', paintOptDots);
+optsBox.addEventListener('change', paintOptDots);
+
+/* The field grows with the text instead of scrolling inside two fixed rows. */
+const taskBox = $('task');
+function growTask() {
+  taskBox.style.height = 'auto';
+  taskBox.style.height = Math.min(taskBox.scrollHeight, 180) + 'px';
+}
+taskBox.addEventListener('input', growTask);
+
+/* Enter sends, Shift+Enter writes a newline, the way every chat box works.
+   IME composition is exempt: mid-composition Enter commits the candidate word
+   and must not also fire the run, which is how a Korean or Japanese task gets
+   sent half-typed. */
+taskBox.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
+  e.preventDefault();
+  if (!$('run').disabled) startRun();
+});
+
+/* --- the two side panels ------------------------------------------------- */
+/* Both closed by default. The conversation is the product; a rail of models
+   and a pane of files you have not made yet are furniture around it. */
+function setWorkspace(open) {
+  document.body.classList.toggle('ws-open', open);
+  $('ws-btn').setAttribute('aria-pressed', open ? 'true' : 'false');
+  if (open) $('ws-count').classList.add('hidden');
+}
+function setRail(open) {
+  document.body.classList.toggle('rail-open', open);
+  if (open) $('agent-filter').focus();
+}
+$('ws-btn').onclick = () => setWorkspace(!document.body.classList.contains('ws-open'));
+$('rail-close').onclick = () => setRail(false);
+$('model').addEventListener('change', (e) => {
+  if (e.target.value !== MORE) return;
+  setRail(true);
+  syncModel();          // put the picker back on the model actually in use
+});
+
+/* Steps only. Pure presentation: nothing is dropped from the DOM, so toggling
+   back mid-run loses nothing and the filter costs one class on <body>. */
+const stepsToggle = $('steps-toggle');
+stepsToggle.onchange = () => {
+  document.body.classList.toggle('steps-only', stepsToggle.checked);
+  autoscroll();
+};
 
 /* --------------------------------------------------------------- boot --- */
 
@@ -856,21 +1445,19 @@ $('reset').onclick = async () => {
   await loadAgents(true);
 };
 
+$('agent-filter').addEventListener('input', renderAgents);
+paintOptDots();
+growTask();
+
 loadAgents();
 loadMcp();
 setInterval(() => { if (!S.run) loadAgents(true); }, 20000);
 
-/* Registering the worker is what makes the browser offer "Install app". It is
-   not required for anything the page does, so a failure is silent — an old
-   browser, or a pywebview window with no SW support, still works normally. */
+/* Registering the worker is what makes the browser offer "Install app". Nothing
+   on the page needs it, so a failure is silent — an old browser, or the
+   pywebview window, still works normally. */
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch(() => {});
   });
-}
-
-/* In a standalone window there is no browser chrome, so the drag region has to
-   come from the page or the title bar feels dead. */
-if (window.matchMedia('(display-mode: standalone)').matches) {
-  document.documentElement.classList.add('standalone');
 }
