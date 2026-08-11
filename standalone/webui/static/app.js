@@ -687,11 +687,13 @@ function meters(c, budget) {
    timeline is about to say anyway, and this strip has to stay one or two rows
    tall beside the Steps only button. */
 let planSteps = [];
+let planCursor = -1;   // index of the furthest step reached so far
 function drawPlan(content) {
   /* Idempotent: clear before drawing. Appending meant a second plan event
      duplicated the whole strip, and the harness can legitimately emit one
      again after a failure. A step already spent must never reappear. */
   $('plan').textContent = '';
+  planCursor = -1;
   planSteps = String(content).split('\n').filter(Boolean).map((line) => {
     const m = line.match(/^\d+\.\s*(\S+)/);
     const node = el('span', 'step', m ? m[1] : clip(line, 28));
@@ -701,14 +703,28 @@ function drawPlan(content) {
   });
   if (planSteps[0]) planSteps[0].node.classList.add('now');
 }
+
+/* The pointer only moves forward. A real run showed why: the model skipped
+   step 3, completed 4 and 5, and "now" walked backwards onto the skipped step,
+   so a finished plan pointed at something it had already moved past. A step
+   the run overtook is not what happens next, it is a step that did not happen,
+   so it goes quiet rather than reclaiming the cursor. */
 function advancePlan(tool) {
-  const step = planSteps.find((s) => !s.done && s.tool === tool);
-  if (!step) return;                       // an unplanned call: leave the plan alone
-  step.done = true;
-  step.node.classList.remove('now');
-  step.node.classList.add('done');
-  const next = planSteps.find((s) => !s.done);
+  const i = planSteps.findIndex((s) => !s.done && s.tool === tool);
+  if (i < 0) return;                       // an unplanned call: leave the plan alone
+  planSteps[i].done = true;
+  planSteps[i].node.classList.remove('now');
+  planSteps[i].node.classList.add('done');
+  if (i > planCursor) planCursor = i;
+  for (const s of planSteps) s.node.classList.remove('now');
+  const next = planSteps.find((s, j) => !s.done && j > planCursor);
   if (next) next.node.classList.add('now');
+}
+
+/* Nothing is "next" once the run is over. Without this the strip kept a live
+   pointer on a finished run. */
+function endPlan() {
+  for (const s of planSteps) s.node.classList.remove('now');
 }
 
 /* --- events ------------------------------------------------------------ */
@@ -902,6 +918,7 @@ function onConfirm(e) {
    answering what it did and what it made. Bounded, not a dump. */
 function onEnd(e) {
   stopClock();
+  endPlan();
   const n = push(e.finished ? 'made' : 'bad');
   const card = el('div', 'endcard' + (e.finished ? '' : ' cut'));
 
@@ -976,6 +993,7 @@ function resetRun() {
   $('empty').classList.add('hidden');
   $('plan').textContent = '';
   planSteps = [];
+  planCursor = -1;
   S.call = null;
   S.banner = null;
   doneSummary = null;
