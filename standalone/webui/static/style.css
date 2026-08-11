@@ -476,6 +476,28 @@ body.resizing { user-select: none; cursor: col-resize; }
 .ev.wordless { padding-block: 2px; }
 .ev.wordless .when { margin-top: 0; }
 
+/* The run counters, folded behind their own disclosure inside the end card. */
+.endmore { margin-top: 10px; }
+.endmore-sum {
+  display: flex; align-items: center; gap: 8px; cursor: pointer;
+  font-size: var(--t-meta); color: var(--ink-faint);
+  padding: 4px 0; list-style: none; user-select: none;
+}
+.endmore-sum::-webkit-details-marker { display: none; }
+/* One triangle, rotated, rather than two glyphs that can disagree. */
+.endmore-sum::before {
+  content: '▶'; font-size: 8px; transition: transform .15s ease;
+}
+.endmore[open] > .endmore-sum::before { transform: rotate(90deg); }
+.endmore-sum:hover { color: var(--ink-dim); }
+/* The digest is what the closed state still tells you. */
+.endmore-digest { color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.endmore[open] .endmore-digest { display: none; }
+body.no-stats .endmore { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .endmore-sum::before { transition: none; }
+}
+
 /* --------------------------------------------------------- preferences --- */
 
 .prefs-wrap { position: relative; display: flex; }
@@ -618,10 +640,14 @@ button.menu-row[aria-checked="true"] .tick { opacity: 1; }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .composer { background: var(--panel-2); border-color: var(--line); }
 }
+/* One row is the resting height and it is stated here, not left to whatever the
+   last inline style happened to be. JS only ever grows it past this. */
 .composer textarea {
   display: block; width: 100%; resize: none; background: transparent; border: 0;
   padding: 4px 0 8px; font-size: var(--t-base); line-height: var(--lh-read);
-  color: var(--ink); max-height: 180px;
+  color: var(--ink);
+  height: calc(var(--t-base) * var(--lh-read) + 12px);
+  max-height: 180px;
 }
 .composer textarea:focus { outline: none; }
 .composer textarea::placeholder { color: var(--ink-faint); }
@@ -765,16 +791,29 @@ button.ghost:hover, a.ghost:hover { color: var(--ink); }
 }
 /* No max-width here, deliberately. The column width IS the measure cap: a
    640px or 768px text cap can never bind inside a pane this wide. */
-.feed-in { position: relative; padding-left: 22px; }
+/* The rail line and the dots on it are positioned against different boxes: the
+   line against .feed-in, each dot against its own .ev, which starts one
+   padding-left in. They were two hardcoded offsets that were never derived from
+   each other, and they did not agree: the line's centre landed on 4.5px and the
+   dots' on 5.0px, so every dot sat half a pixel right of the thread it is
+   supposed to be strung on. Small, but a vertical run of them reads as a lean.
+   One x now, and both centre themselves on it, so the dot size can change
+   without the alignment moving. */
+.feed-in {
+  --rail-x: 5px;       /* the rail's centre line, from the feed's left edge */
+  --rail-inset: 22px;  /* how far the text sits from that edge */
+  position: relative; padding-left: var(--rail-inset);
+}
 .feed-in::before {
-  content: ''; position: absolute; left: 4px; top: 4px; bottom: 0;
-  width: 1px; background: var(--line);
+  content: ''; position: absolute; left: var(--rail-x); top: 4px; bottom: 0;
+  width: 1px; transform: translateX(-50%); background: var(--line);
 }
 .feed-in:empty::before { display: none; }
 .ev { position: relative; margin-bottom: 12px; animation: rise .22s ease-out; }
 @keyframes rise { from { opacity: 0; transform: translateY(6px); } }
 .ev::before {
-  content: ''; position: absolute; left: -21px; top: 5px; width: 8px; height: 8px;
+  content: ''; position: absolute; top: 5px; width: 8px; height: 8px;
+  left: calc(var(--rail-x) - var(--rail-inset)); transform: translateX(-50%);
   border-radius: 50%; background: var(--panel); border: 1px solid var(--line);
 }
 .ev.act::before { background: var(--accent); border-color: var(--accent); }

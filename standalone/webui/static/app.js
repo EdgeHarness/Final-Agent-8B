@@ -1130,15 +1130,26 @@ function onEnd(e) {
   }
   const badReplies = e.parse_failures + e.invalid_calls;
   if (badReplies) stats.append(stat(badReplies, plural(badReplies, 'bad reply'), true));
-  card.append(stats);
+  /* The counters are for whoever wants to audit the run, and a lot of people
+     never do: they asked for a summary and a file, not a token count. They fold
+     away behind a one-line digest, and the preferences menu can drop them
+     entirely. On by default, because the numbers are the honest part. */
+  const details = el('details', 'endmore');
+  details.open = true;
+  const sum = el('summary', 'endmore-sum');
+  sum.append(el('span', null, 'Run details'),
+             el('span', 'endmore-digest',
+                `${e.calls} ${plural(e.calls, 'call')} · ${e.wall}s`));
+  details.append(sum, stats);
 
   /* Its own class, not .endlabel: that one uppercases, which turned a
      case-sensitive path into AGENTS/8B/LOGS/RUN_003.JSON. */
   if (e.log) {
     const f = el('div', 'endfoot');
     f.append(el('span', null, 'Transcript'), el('code', null, e.log));
-    card.append(f);
+    details.append(f);
   }
+  card.append(details);
   n.append(card);
 }
 
@@ -1307,6 +1318,14 @@ for (const b of prefsBox.querySelectorAll('[data-theme-set]')) {
   b.onclick = () => setTheme(b.dataset.themeSet);
 }
 $('opt-glass').onchange = (e) => setGlass(e.target.checked);
+
+function setStats(on) {
+  document.body.classList.toggle('no-stats', !on);
+  $('opt-stats').checked = on;
+  store('agentlab-stats', on ? 'on' : 'off');
+}
+setStats(stored('agentlab-stats') !== 'off');
+$('opt-stats').onchange = (e) => setStats(e.target.checked);
 document.addEventListener('click', () => { if (!prefsBox.hidden) setPrefs(false); });
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !prefsBox.hidden) { setPrefs(false); prefsBtn.focus(); }
@@ -1411,10 +1430,24 @@ optsBox.addEventListener('change', paintOptDots);
 /* The field grows with the text instead of scrolling inside two fixed rows. */
 const taskBox = $('task');
 function growTask() {
+  // Empty means back to the CSS resting height, not "whatever it grew to last
+  // time". The inline height was set unconditionally, so once the box had been
+  // tall it stayed tall even with nothing in it, and on a short window an empty
+  // composer could hold a third of the screen.
+  if (!taskBox.value) {
+    taskBox.style.height = '';
+    return;
+  }
   taskBox.style.height = 'auto';
-  taskBox.style.height = Math.min(taskBox.scrollHeight, 180) + 'px';
+  // Also bounded by the window: 180px is reasonable on a desktop and absurd in
+  // a 700px-tall pane, where it plus the button row is a third of everything.
+  const cap = Math.min(180, Math.round(window.innerHeight * 0.22));
+  taskBox.style.height = Math.min(taskBox.scrollHeight, cap) + 'px';
 }
 taskBox.addEventListener('input', growTask);
+// A window that got shorter has to re-clamp, or the cap only ever applied to
+// the size the window happened to be while typing.
+window.addEventListener('resize', growTask);
 
 /* Enter sends, Shift+Enter writes a newline, the way every chat box works.
    IME composition is exempt: mid-composition Enter commits the candidate word
