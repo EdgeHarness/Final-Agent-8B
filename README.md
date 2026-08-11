@@ -42,7 +42,8 @@ run.ps1
 and to the copy in every other size folder. It:
 
 1. reads `config.json`, asserts the Ollama URL is local,
-2. parses flags, decides the LLM call budget (14 simulated, 40 with `--root`),
+2. parses flags, decides the LLM call budget (the model's profile decides the
+   simulated default - 20 for this 8B - and `--root` raises it to 40),
 3. opens `workspace/` as a **persistent** world and `memory/memory.jsonl`,
 4. builds either a plain `LLM` or a tiered `ModelRouter`,
 5. calls `run_harness(llm, world, mem, task)`,
@@ -78,11 +79,13 @@ Free-form prose is never allowed to become an instruction the model then obeys.
 | repair | near-miss parameter names renamed onto missing required ones (`difflib`, cutoff 0.5); unknown parameters dropped; top-level args lifted into `args` |
 | normalize | `date` → `YYYY-MM-DD` ("tomorrow", "next tuesday", "Jul 23", "7/23" all resolve against the clock); `time`/`start_time`/`end_time` → 24h `HH:MM` ("2pm" → `14:00`) |
 | validate | missing/unknown parameters caught **before** execution; feedback quotes the tool's correct example |
-| dedupe | an identical call against an unchanged world is not re-executed |
+| dedupe | an identical call may repeat up to a per-profile budget while the world is unchanged; a call that FAILED gets no repeat budget, since rerunning it reproduces the error |
+| cross-check | a well-formed date the model wrote itself is compared against the date the task names ("Wednesday" cannot become a Monday unnoticed); a write the model's own plan never proposed, or a write before the planned read, is questioned once and allowed on insistence |
 | execute | tool runs; result truncated to 2000 chars and fed back as `OBSERVATION:` |
 
 **Finish.** When the model calls `done`, a **verifier** call re-reads the task
-against the log of actions actually taken and answers
+against the log of actions actually taken - with each action's RESULT, so it
+can see that the file it is about to demand already exists - and answers
 `{"complete": bool, "missing": str}`. If incomplete, `done` is rejected, the
 gap is quoted back, and the loop continues. Up to two verify rounds. On any
 verifier error it defaults to `complete: true` rather than trapping the agent.
@@ -101,12 +104,13 @@ turns.
 
 ## 3. The tools
 
-Simulated-office mode (the default) exposes 14 tools from
+Simulated-office mode (the default) exposes 16 tools from
 [`harness/tools.py`](../../harness/tools.py):
 
 `list_emails` · `read_email` · `send_email` · `list_events` · `add_event` ·
-`send_message` · `set_reminder` · `create_presentation` · `create_spreadsheet` ·
-`read_spreadsheet` · `think` · `save_memory` · `recall_memories` · `done`
+`update_event` · `cancel_event` · `send_message` · `set_reminder` ·
+`create_presentation` · `create_spreadsheet` · `read_spreadsheet` · `think` ·
+`save_memory` · `recall_memories` · `done`
 
 `create_presentation` and `create_spreadsheet` write **real** files — open the
 `.pptx` / `.xlsx` in `workspace/files/` in PowerPoint or Excel. A cell string
@@ -217,7 +221,7 @@ the seam where a `llama-server` backend plus trained GGUF adapters plugs in.
 | `--small TAG` | cheaper model for routing/verify (implies `--tiers`) |
 | `--deep TAG` | on-demand heavy tier (implies `--tiers`) |
 | `--with-office` | keep the simulated office tools alongside the file tools |
-| `--max-calls N` | LLM call budget (default 14 simulated, 40 with `--root`) |
+| `--max-calls N` | LLM call budget (default: the profile's, 40 with `--root`) |
 
 ---
 
