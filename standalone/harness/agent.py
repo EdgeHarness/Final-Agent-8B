@@ -345,6 +345,13 @@ PLAN_PROMPT = ('Which tools will you need to call to complete this task, in orde
                'Most tasks need only 1-4 calls. Do not include tools the task does not need.')
 
 
+def planned_tools(plan_text):
+    """The tool names out of a rendered plan, in order. plan_step writes each
+    step as "N. tool - what", so this reads back what it wrote."""
+    return [m.group(1) for m in re.finditer(r"^\d+\.\s+(\S+)", plan_text or "", re.M)
+            if m.group(1) in TOOLS]
+
+
 def plan_step(llm, messages, ep):
     """Ask for a tool-grounded plan; return it as short text (or ''). Invalid
     tool names are dropped - free prose never enters the context."""
@@ -404,6 +411,33 @@ def run_harness(llm, world, mem, task_text):
     write_tools = {"send_email", "add_event", "send_message", "set_reminder",
                    "create_presentation", "create_spreadsheet", "save_memory"}
     write_tools |= EXTRA_WRITE_TOOLS  # empty for the benchmark; fs_tools adds its own
+
+    # The plan was rendered for the model to read and then never looked at
+    # again. It is the only statement of intent the run has, so it is worth one
+    # check: if the model planned to look something up and then writes a
+    # document before looking at anything, say so once.
+    #
+    # Observed live, and it is the worst failure this app can produce: asked to
+    # build a spreadsheet of July receipts, an 8B skipped to create_spreadsheet
+    # and invented 100/200/300/400/500 for receipts that are really $230.00,
+    # $87.50 and $412.30. It saved the invented total to long-term memory as a
+    # fact, and the run reported success - every check downstream can see that a
+    # file was written and none can see that its numbers were made up.
+    # Only a read the plan itself put BEFORE its first write counts. Taking the
+    # first non-write in the plan was wrong: a plan of think -> create_spreadsheet
+    # -> read_spreadsheet reads back the file it is about to create, and the
+    # nudge sent the agent to open a spreadsheet that did not exist yet. If the
+    # plan never proposed looking at anything first, there is nothing to hold
+    # the model to and the loop says nothing.
+    planned = planned_tools(plan)
+    first_write_at = next((i for i, t in enumerate(planned) if t in write_tools), None)
+    first_read_planned = None
+    if first_write_at is not None:
+        first_read_planned = next((t for t in planned[:first_write_at]
+                                   if t not in ("think", "done") and t not in write_tools),
+                                  None)
+    looked = False
+    nudged_to_look = False
     last_reply = None
     think_streak = 0
 
@@ -477,6 +511,18 @@ def run_harness(llm, world, mem, task_text):
             continue
         last_reply = reply
 
+        # One nudge, never a block: if it insists, the next identical call runs.
+        if (first_read_planned and not looked and not nudged_to_look
+                and name in write_tools and name != "save_memory"):
+            nudged_to_look = True
+            give_feedback(
+                f"You planned to call {first_read_planned} first and have not read "
+                f"anything yet, so {name} would be writing from memory rather than "
+                f"from the task's own data. Call {first_read_planned} first. If you "
+                f"genuinely do not need it, call {name} again and it will run.",
+                reply)
+            continue
+
         sig = json.dumps({"t": name, "a": args}, sort_keys=True, default=str)
         # A call may repeat up to its budget while the world is unchanged; any
         # successful write moves world_version and hands out a fresh budget,
@@ -521,6 +567,8 @@ def run_harness(llm, world, mem, task_text):
         think_streak = think_streak + 1 if name == "think" else 0
 
         ok, obs = execute(name, args, world, mem)
+        if ok and name not in write_tools and name != "think":
+            looked = True
         if ok and name in write_tools:
             world_version += 1
         # recorded against the world version AFTER any bump, so an identical

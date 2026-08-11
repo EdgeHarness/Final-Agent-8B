@@ -426,8 +426,11 @@ class _ScriptedLLM:
         self.calls = 0
         self.output_tokens = self.prompt_tokens = 0
         self.wall = 0.0
+        self.seen_feedback = []
 
     def chat(self, messages, **kw):
+        if messages and messages[-1]["role"] == "user":
+            self.seen_feedback.append(messages[-1]["content"])
         reply = self.replies[min(self.calls, len(self.replies) - 1)]
         self.calls += 1
         return reply
@@ -482,6 +485,46 @@ class TestLoop(unittest.TestCase):
             _ScriptedLLM([self.call("send_message", to="sam", text="hi")]),
             self.world, self.mem, "message sam")
         self.assertEqual(len(self.world.messages), 1)
+
+    def test_writing_before_reading_is_questioned_once(self):
+        """The worst failure this app can produce: asked for a spreadsheet of
+        July receipts, an 8B skipped the inbox and invented the numbers. The
+        plan had named the read step. One nudge, then it gets its way."""
+        agent.set_profile(profiles.replace(profiles.DEFAULT, plan=True, verify_rounds=0))
+        plan = '{"steps": [{"tool": "list_emails", "what": "find the receipts"}, '
+        plan += '{"tool": "create_spreadsheet", "what": "totals"}]}'
+        llm = _ScriptedLLM([plan, self.call("create_spreadsheet", filename="r.xlsx",
+                                            rows=[["Item", "Cost"], ["made up", 100]])])
+        agent.run_harness(llm, self.world, self.mem, "spreadsheet of my July receipts")
+        written = self.executed("create_spreadsheet")
+        self.assertEqual(len(written), 1, "the nudge should delay the write, not block it")
+        nudges = [n for n in llm.seen_feedback if "writing from memory" in n]
+        self.assertEqual(len(nudges), 1, "exactly one nudge, or the agent is stuck")
+
+    def test_a_run_that_reads_first_is_never_nudged(self):
+        agent.set_profile(profiles.replace(profiles.DEFAULT, plan=True, verify_rounds=0))
+        plan = '{"steps": [{"tool": "list_emails", "what": "find them"}, '
+        plan += '{"tool": "create_spreadsheet", "what": "totals"}]}'
+        llm = _ScriptedLLM([plan, self.call("list_emails"),
+                            self.call("create_spreadsheet", filename="r.xlsx",
+                                      rows=[["a", 1]]),
+                            self.call("done", summary="done")])
+        agent.run_harness(llm, self.world, self.mem, "spreadsheet of my July receipts")
+        self.assertFalse([n for n in llm.seen_feedback if "writing from memory" in n])
+
+    def test_a_read_planned_after_the_write_is_not_a_source_read(self):
+        """A plan of think -> create_spreadsheet -> read_spreadsheet reads back
+        the file it is about to make. Nudging toward it sent the agent to open a
+        spreadsheet that did not exist yet."""
+        agent.set_profile(profiles.replace(profiles.DEFAULT, plan=True, verify_rounds=0))
+        plan = ('{"steps": [{"tool": "think", "what": "plan it"}, '
+                '{"tool": "create_spreadsheet", "what": "make it"}, '
+                '{"tool": "read_spreadsheet", "what": "check it"}]}')
+        llm = _ScriptedLLM([plan, self.call("create_spreadsheet", filename="r.xlsx",
+                                            rows=[["a", 1]]),
+                            self.call("done", summary="done")])
+        agent.run_harness(llm, self.world, self.mem, "spreadsheet of my July receipts")
+        self.assertFalse([n for n in llm.seen_feedback if "writing from memory" in n])
 
     def test_done_ends_the_run_and_keeps_the_summary(self):
         agent.set_profile(profiles.replace(profiles.DEFAULT, plan=False, verify_rounds=0))

@@ -922,8 +922,18 @@ function onToken(e) {
    shimmers "Thinking" forever. This is the one place that does it. */
 function settleCall(text, raw) {
   if (!S.call) return;
-  S.call.body.className = text ? 'think' : 'think quiet';
-  S.call.body.textContent = text || 'no reasoning given';
+  if (text) {
+    S.call.body.className = 'think';
+    S.call.body.textContent = text;
+  } else {
+    // A model call with no "thought" is ordinary: the tool row underneath is
+    // what the call was for. Printing "no reasoning given" turned that into a
+    // line of its own, and on a five-call run four of the eleven rows existed
+    // only to report the absence. The row keeps its timing, which is real, and
+    // the raw reply is still one click away.
+    S.call.body.remove();
+    S.call.node.classList.add('wordless');
+  }
   if (raw) S.call.node.append(details('raw reply', raw));
   S.call.node.classList.add('settled');
   S.call = null;
@@ -1244,32 +1254,66 @@ function finishRun() {
 
 /* --------------------------------------------------------------- chrome -- */
 
-/* An explicit choice, stored, beating the OS preference in both directions. No
-   attribute at all means "follow the OS", which is the right default and is
-   what a first-time visitor gets. */
-const themeBtn = $('theme');
-const isDark = () => {
-  const set = document.documentElement.getAttribute('data-theme');
-  return set ? set === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+/* Appearance and glass, in one popover. An explicit theme choice beats the OS
+   preference in both directions; no attribute at all means "follow the system",
+   which is the honest default and what a first run gets. The old control was a
+   two-state toggle, which could not express that third state at all: once you
+   had clicked it once you were pinned to a theme forever. */
+const prefsBtn = $('prefs-btn');
+const prefsBox = $('prefs');
+
+const store = (key, value) => {
+  try {
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, value);
+  } catch (_) { /* storage blocked; the session still works, it just forgets */ }
 };
-const paintTheme = () => {
-  // the drawn mark stays; only the label changes, and it names the action
-  themeBtn.title = isDark() ? 'Switch to light' : 'Switch to dark';
-  themeBtn.setAttribute('aria-label', themeBtn.title);
+const stored = (key) => {
+  try { return localStorage.getItem(key); } catch (_) { return null; }
 };
-try {
-  const saved = localStorage.getItem('agentlab-theme');
-  if (saved) document.documentElement.setAttribute('data-theme', saved);
-} catch (_) { /* storage blocked; the OS default still works */ }
-themeBtn.onclick = () => {
-  const next = isDark() ? 'light' : 'dark';
-  document.documentElement.setAttribute('data-theme', next);
-  try { localStorage.setItem('agentlab-theme', next); } catch (_) {}
-  paintTheme();
-};
+
+function setTheme(choice) {
+  if (choice === 'system') document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.setAttribute('data-theme', choice);
+  store('agentlab-theme', choice === 'system' ? null : choice);
+  paintPrefs();
+}
+
+function setGlass(on) {
+  document.body.classList.toggle('flat', !on);
+  $('opt-glass').checked = on;
+  store('agentlab-glass', on ? 'on' : 'off');
+}
+
+function paintPrefs() {
+  const current = document.documentElement.getAttribute('data-theme') || 'system';
+  for (const b of prefsBox.querySelectorAll('[data-theme-set]')) {
+    b.setAttribute('aria-checked', String(b.dataset.themeSet === current));
+    b.setAttribute('role', 'radio');
+  }
+}
+
+function setPrefs(open) {
+  prefsBox.hidden = !open;
+  prefsBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+setTheme(stored('agentlab-theme') || 'system');
+setGlass(stored('agentlab-glass') !== 'off');
+
+prefsBtn.onclick = (e) => { e.stopPropagation(); setPrefs(prefsBox.hidden); };
+prefsBox.onclick = (e) => e.stopPropagation();
+for (const b of prefsBox.querySelectorAll('[data-theme-set]')) {
+  b.onclick = () => setTheme(b.dataset.themeSet);
+}
+$('opt-glass').onchange = (e) => setGlass(e.target.checked);
+document.addEventListener('click', () => { if (!prefsBox.hidden) setPrefs(false); });
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !prefsBox.hidden) { setPrefs(false); prefsBtn.focus(); }
+});
+
 // follow the OS while the user has not overridden it
-matchMedia('(prefers-color-scheme: dark)').addEventListener('change', paintTheme);
-paintTheme();
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', paintPrefs);
 
 /* Ratio, not pixels: a pixel width would mean the split silently changes
    meaning when the window resizes. Percent keeps the user's intent ("show me

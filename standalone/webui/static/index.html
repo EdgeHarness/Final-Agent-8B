@@ -47,15 +47,48 @@
       <span>Workspace</span>
       <span class="ws-count hidden" id="ws-count">0</span>
     </button>
-    <button class="theme" id="theme" type="button" aria-label="Switch theme">
-      <!-- One drawn mark, not a sun/moon pair: a half-filled disc reads as
-           contrast in either state, so nothing has to decide whether the icon
-           shows the current theme or the target. -->
-      <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
-        <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
-        <path d="M8 2a6 6 0 0 0 0 12z" fill="currentColor"/>
-      </svg>
-    </button>
+    <!-- Appearance used to be a single toggle that swapped light and dark and
+         nothing else. It lives here now with the other thing a person sets
+         once and forgets, and a two-state toggle could not express "follow the
+         system", which is the honest default and what a first run gets. -->
+    <div class="prefs-wrap">
+      <button class="theme prefs-btn" id="prefs-btn" type="button" aria-haspopup="dialog"
+              aria-expanded="false" aria-controls="prefs" title="Preferences">
+        <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+          <circle cx="8" cy="5.6" r="2.7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+          <path d="M2.6 14c.5-2.7 2.7-4.2 5.4-4.2s4.9 1.5 5.4 4.2" fill="none"
+                stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+        </svg>
+        <span class="sr">Preferences</span>
+      </button>
+
+      <div class="prefs menu" id="prefs" role="dialog" aria-label="Preferences" hidden>
+        <p class="menu-head">Appearance</p>
+        <button class="menu-row" type="button" data-theme-set="system">
+          <span class="menu-label">Follow the system</span>
+          <span class="tick" aria-hidden="true">✓</span>
+        </button>
+        <button class="menu-row" type="button" data-theme-set="light">
+          <span class="menu-label">Light</span>
+          <span class="tick" aria-hidden="true">✓</span>
+        </button>
+        <button class="menu-row" type="button" data-theme-set="dark">
+          <span class="menu-label">Dark</span>
+          <span class="tick" aria-hidden="true">✓</span>
+        </button>
+
+        <div class="menu-rule"></div>
+
+        <!-- Glass is a preference, not a fixed style: it costs GPU on every
+             scroll and it lowers contrast between a panel and what is under
+             it. Off swaps in the solid panel colour, so nothing moves. -->
+        <label class="menu-row">
+          <input type="checkbox" id="opt-glass" checked>
+          <span class="menu-label">Glass panels</span>
+          <span class="tick" aria-hidden="true">✓</span>
+        </label>
+      </div>
+    </div>
   </div>
 </header>
 
