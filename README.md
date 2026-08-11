@@ -59,6 +59,31 @@ same task against the same state produce the same trajectory.
 `run_harness()` in [`harness/agent.py`](../../harness/agent.py). One tool call
 per model reply, JSON only.
 
+```mermaid
+flowchart TD
+    T([task]) --> MEM["inject matching long-term<br/>memories into the prompt"]
+    MEM --> PLAN["plan: tool names only<br/>invalid names dropped"]
+    PLAN --> CALL["model reply<br/>format=json, one tool call"]
+    CALL --> PARSE{parses?}
+    PARSE -- no --> FB["corrective feedback<br/>(a repeated bad reply is<br/>deleted from context)"]
+    FB --> CALL
+    PARSE -- yes --> ISDONE{"done()?"}
+
+    ISDONE -- no --> REPAIR["repair and normalize args:<br/>near-miss names renamed,<br/>unknown dropped,<br/>tomorrow -> YYYY-MM-DD"]
+    REPAIR --> CHECKS["cross-checks:<br/>params valid<br/>date agrees with the task<br/>write named by the plan<br/>planned read before writing<br/>no identical call vs<br/>an unchanged world"]
+    CHECKS -- questioned --> FB
+    CHECKS -- ok --> EXEC["execute the tool<br/>OBSERVATION into context"]
+    EXEC --> CALL
+
+    ISDONE -- yes --> VERIFY{"verifier: requirements vs<br/>actions and their results"}
+    VERIFY -- "incomplete:<br/>gap quoted" --> FB
+    VERIFY -- "complete, or<br/>errored: fail open" --> FIN(["episode ends<br/>world snapshotted<br/>(even on crash or Stop)"])
+```
+
+Every box above is paid out of the same call budget as the work itself, and
+every arrow into *corrective feedback* is a question, not a block: a call the
+model repeats after being questioned is allowed to run.
+
 **Setup.** Relevant long-term memories are retrieved (`mem.search(task, k=3)`,
 keyword overlap, matches only — never a recency fallback) and injected into the
 system prompt. The prompt carries the response shape, the rules, and the full
