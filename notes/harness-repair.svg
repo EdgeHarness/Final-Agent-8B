@@ -1,0 +1,123 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 690" width="980" height="690"
+     font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, system-ui, sans-serif">
+<title>How the harness repairs a model reply</title>
+<desc>A broken model reply passing through six repair stages, showing which are fixed
+in Python at no cost and which spend an LLM call on corrective feedback.</desc>
+
+<style>
+  /* Inks are named so the drawing flips with the reader's theme rather than
+     shipping a light diagram that goes invisible on a dark page. */
+  :root { color-scheme: light dark; }
+  .bg    { fill: #ffffff; }
+  .ink   { fill: #0d0d0d; }
+  .dim   { fill: #5d5d5d; }
+  .faint { fill: #8f8f8f; }
+  .card  { fill: #f7f7f7; stroke: #e0e0e0; }
+  .free  { fill: #eef4f0; stroke: #276749; }
+  .cost  { fill: #fdf6e9; stroke: #7a5100; }
+  .lfree { fill: #276749; }
+  .lcost { fill: #7a5100; }
+  .edge  { stroke: #b4b4b4; }
+  .mono  { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  @media (prefers-color-scheme: dark) {
+    .bg    { fill: #0d0d0d; }
+    .ink   { fill: #ececec; }
+    .dim   { fill: #b4b4b4; }
+    .faint { fill: #8f8f8f; }
+    .card  { fill: #171717; stroke: #2f2f2f; }
+    .free  { fill: #14231c; stroke: #4ea67c; }
+    .cost  { fill: #241d10; stroke: #d99a3d; }
+    .lfree { fill: #4ea67c; }
+    .lcost { fill: #d99a3d; }
+    .edge  { stroke: #3a3a3a; }
+  }
+</style>
+
+<defs>
+  <marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+    <path d="M0 0 L10 5 L0 10 z" fill="#b4b4b4"/>
+  </marker>
+</defs>
+
+<rect class="bg" x="0" y="0" width="980" height="690"/>
+
+<text class="ink" x="40" y="46" font-size="21" font-weight="650">How the harness repairs a reply</text>
+<text class="dim" x="40" y="70" font-size="13">Six stages between what the model wrote and what actually runs.</text>
+
+<rect class="free" x="614" y="30" width="12" height="12" rx="3" stroke-width="1.2"/>
+<text class="lfree" x="632" y="40" font-size="11.5">fixed in Python &#8212; 0 LLM calls</text>
+<rect class="cost" x="614" y="52" width="12" height="12" rx="3" stroke-width="1.2"/>
+<text class="lcost" x="632" y="62" font-size="11.5">sent back as feedback &#8212; 1 call</text>
+
+<rect class="card" x="40" y="96" width="380" height="72" rx="10" stroke-width="1.2"/>
+<text class="faint" x="56" y="118" font-size="10.5" letter-spacing="1.4">MODEL REPLY</text>
+<text class="dim mono" x="56" y="140" font-size="11.5">Sure! ```{"tool":"send_mail",</text>
+<text class="dim mono" x="56" y="157" font-size="11.5">"args":{"to_addr":"x","when":"2pm",}}```</text>
+
+<path class="edge" d="M230 168 L230 194" stroke-width="1.4" fill="none" marker-end="url(#a)"/>
+
+<rect class="free" x="40" y="196" width="380" height="72" rx="10" stroke-width="1.3"/>
+<text class="ink" x="56" y="219" font-size="13.5" font-weight="600">1 &#183; Extract the JSON</text>
+<text class="dim" x="56" y="239" font-size="11.5">Strips fences and prose, brace-matches the first object,</text>
+<text class="dim" x="56" y="256" font-size="11.5">forgives a trailing comma.</text>
+<text class="lfree" x="404" y="219" font-size="11.5" text-anchor="end">free</text>
+
+<rect class="free" x="40" y="280" width="380" height="58" rx="10" stroke-width="1.3"/>
+<text class="ink" x="56" y="303" font-size="13.5" font-weight="600">2 &#183; Repair the arguments</text>
+<text class="dim mono" x="56" y="323" font-size="11.5">to_addr &#8594; to</text>
+<text class="dim" x="166" y="323" font-size="11.5">by closest match; unknown keys dropped.</text>
+<text class="lfree" x="404" y="303" font-size="11.5" text-anchor="end">free</text>
+
+<rect class="free" x="40" y="350" width="380" height="58" rx="10" stroke-width="1.3"/>
+<text class="ink" x="56" y="373" font-size="13.5" font-weight="600">3 &#183; Normalise dates and times</text>
+<text class="dim mono" x="56" y="393" font-size="11.5">"2pm" &#8594; "14:00"   "tomorrow" &#8594; 2026-08-12</text>
+<text class="lfree" x="404" y="373" font-size="11.5" text-anchor="end">free</text>
+
+<rect class="cost" x="40" y="420" width="380" height="58" rx="10" stroke-width="1.3"/>
+<text class="ink" x="56" y="443" font-size="13.5" font-weight="600">4 &#183; Validate against the schema</text>
+<text class="dim" x="56" y="463" font-size="11.5">Still wrong? The feedback carries the tool's own example.</text>
+<text class="lcost" x="404" y="443" font-size="11.5" text-anchor="end">1 call</text>
+
+<rect class="cost" x="40" y="490" width="380" height="72" rx="10" stroke-width="1.3"/>
+<text class="ink" x="56" y="513" font-size="13.5" font-weight="600">5 &#183; Cross-check against the task</text>
+<text class="dim" x="56" y="533" font-size="11.5">Task said Wednesday, call says Monday. Writing without</text>
+<text class="dim" x="56" y="550" font-size="11.5">the read you planned. Questioned, never rewritten.</text>
+<text class="lcost" x="404" y="513" font-size="11.5" text-anchor="end">1 call</text>
+
+<rect class="cost" x="40" y="574" width="380" height="72" rx="10" stroke-width="1.3"/>
+<text class="ink" x="56" y="597" font-size="13.5" font-weight="600">6 &#183; Break the loop</text>
+<text class="dim" x="56" y="617" font-size="11.5">Same call against an unchanged world: restate the task,</text>
+<text class="dim" x="56" y="634" font-size="11.5">and delete the repeated exchange from the context.</text>
+<text class="lcost" x="404" y="597" font-size="11.5" text-anchor="end">1 call</text>
+
+<line class="edge" x1="470" y1="96" x2="470" y2="646" stroke-width="1" stroke-dasharray="3 4"/>
+
+<text class="faint" x="510" y="118" font-size="10.5" letter-spacing="1.4">WHY IT IS SHAPED THIS WAY</text>
+
+<text class="ink" x="510" y="152" font-size="13.5" font-weight="600">Repair before rejection</text>
+<text class="dim" x="510" y="174" font-size="12">A wrong parameter name is not a reasoning failure, so it</text>
+<text class="dim" x="510" y="191" font-size="12">should not cost a turn. Stages 1&#8211;3 fix in Python what a</text>
+<text class="dim" x="510" y="208" font-size="12">naive loop would spend an LLM call arguing about. On a</text>
+<text class="dim" x="510" y="225" font-size="12">20-call budget that is the difference between finishing</text>
+<text class="dim" x="510" y="242" font-size="12">and running out mid-task.</text>
+
+<text class="ink" x="510" y="282" font-size="13.5" font-weight="600">Question, do not rewrite</text>
+<text class="dim" x="510" y="304" font-size="12">Stage 5 never silently corrects a date or drops a write.</text>
+<text class="dim" x="510" y="321" font-size="12">It says what looks wrong and what the task implied, then</text>
+<text class="dim" x="510" y="338" font-size="12">lets the model decide &#8212; a tool result may know something</text>
+<text class="dim" x="510" y="355" font-size="12">the task text does not.</text>
+
+<text class="ink" x="510" y="395" font-size="13.5" font-weight="600">Repetition is an attractor</text>
+<text class="dim" x="510" y="417" font-size="12">A repeated exchange makes a small model more likely to</text>
+<text class="dim" x="510" y="434" font-size="12">repeat again, so stage 6 does not merely refuse to re-run</text>
+<text class="dim" x="510" y="451" font-size="12">it &#8212; it removes the duplicate from context. The</text>
+<text class="dim" x="510" y="468" font-size="12">transcript is managed, not appended to.</text>
+
+<text class="ink" x="510" y="508" font-size="13.5" font-weight="600">The budget is shared</text>
+<text class="dim" x="510" y="530" font-size="12">Plan, verify and every repair above come out of the same</text>
+<text class="dim" x="510" y="547" font-size="12">call budget the unscaffolded loop gets. The harness is</text>
+<text class="dim" x="510" y="564" font-size="12">not given more compute &#8212; it spends the same budget on</text>
+<text class="dim" x="510" y="581" font-size="12">fewer wasted turns.</text>
+
+<text class="faint mono" x="510" y="628" font-size="10.5">standalone/harness/agent.py</text>
+</svg>
