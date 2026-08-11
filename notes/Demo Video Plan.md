@@ -140,8 +140,8 @@ Other pre-flight:
 
 **This is the take 6 cut.** Takes 1 to 5 shot an earlier version where Dana's
 numbers were written out in the email body. Three changes, all in section 3c:
-the numbers now live in an attachment, the ask carries a date, and one beat is
-reserved for a guard firing. Take 5 remains a valid fallback if take 6 does not
+the numbers now live in an attachment, the task text is measured rather than
+written for feel (section 5), and one beat is reserved for a guard firing. Take 5 remains a valid fallback if take 6 does not
 come together.
 
 Total 85s. Word budgets at 2.4 words/second.
@@ -225,9 +225,12 @@ What the fixture does is raise the odds honestly. Three ways it can fire:
 - **Planned read before writing.** The plan names `read_spreadsheet` before
   `create_spreadsheet`; an 8B that jumps to the write is questioned once. Most
   likely of the three, precisely because the data now lives in a file.
-- **Date mismatch.** Dana's mail says "Wednesday's review" and asks for a
-  Thursday reminder. `set_reminder` is a write with a date, so a wrong ISO date
-  gets caught and quoted back. This is why the reminder is in the ask at all.
+- **Date mismatch.** Dana's mail says "Wednesday's review", but nothing in the
+  ask writes a date, so this one has no target. It DID have one: the email used
+  to end "Remind me Thursday to send it round". That was cut after measurement,
+  because the reminder landed in 0 runs out of 3 and a third deliverable an 8B
+  reliably skips is a worse problem on camera than a missing guard beat. Put it
+  back only if you would rather have the chance of a guard than a clean run.
 - **Unplanned write.** Fires if the model invents work its own plan never named.
 
 So: shoot three or four takes. If a guard fires in one of them, that is the
