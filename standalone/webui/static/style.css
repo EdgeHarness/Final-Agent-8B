@@ -1069,7 +1069,10 @@ pre.raw {
 .node > summary:hover { background: var(--panel-2); }
 .node .caret { color: var(--ink-faint); font-size: 9px; width: 8px; transition: transform .15s; }
 .node[open] .caret { transform: rotate(90deg); }
-.node .ico { font-size: var(--t-sm); width: 16px; text-align: center; }
+/* The icon labels the row, it does not compete with it: drawn a step down from
+   the name's ink, and brought up to match when the section is open. */
+.node .ico { display: grid; place-items: center; width: 16px; color: var(--ink-faint); }
+.node[open] > summary .ico { color: var(--ink-dim); }
 .node .nm { flex: 1; color: var(--ink-dim); }
 .node[open] .nm { color: var(--ink); }
 .count {

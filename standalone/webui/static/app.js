@@ -29,14 +29,49 @@ const ago = (ts) => {
   return `${Math.round(s / 86400)} d ago`;
 };
 
-const TOOL_ICON = {
-  list_emails: '📥', read_email: '✉️', send_email: '📤', list_events: '📅',
-  add_event: '📅', send_message: '💬', set_reminder: '⏰',
-  create_presentation: '📊', create_spreadsheet: '📈', read_spreadsheet: '📈',
-  think: '💭', save_memory: '🧠', recall_memories: '🧠', done: '✅',
-  list_dir: '📁', read_file: '📄', write_file: '✏️', append_file: '➕',
-  delete_path: '🗑️', move_path: '↔️', search_files: '🔎', run_command: '⌨️',
+/* One drawn set at one weight, replacing the emoji that labelled these rows.
+   Emoji are rendered by the OS in its own colours and drawing style, so a
+   column of them reads as a sticker sheet pasted onto a monochrome interface,
+   and the same file looks different on every machine. These are strokes in
+   currentColor, so they inherit the row's own ink and both themes.
+   Geometry matches the folder glyph already in the topbar: a 16 unit box at
+   1.3 stroke, round caps and joins. */
+const ICONS = {
+  folder: ['M1.5 4.2A1.2 1.2 0 0 1 2.7 3h3.1l1.4 1.6h5.1a1.2 1.2 0 0 1 1.2 1.2v6A1.2 1.2 0 0 1 12.3 13H2.7a1.2 1.2 0 0 1-1.2-1.2z'],
+  inbox: ['M2.4 9.4h2.7l.9 1.6h4l.9-1.6h2.7',
+          'M2.4 9.4 4.1 3.9a1.2 1.2 0 0 1 1.1-.9h5.6a1.2 1.2 0 0 1 1.1.9l1.7 5.5v2.3a1.2 1.2 0 0 1-1.2 1.2H3.6a1.2 1.2 0 0 1-1.2-1.2z'],
+  calendar: ['M2.2 5.4A1.2 1.2 0 0 1 3.4 4.2h9.2a1.2 1.2 0 0 1 1.2 1.2v7.4a1.2 1.2 0 0 1-1.2 1.2H3.4a1.2 1.2 0 0 1-1.2-1.2z',
+             'M2.2 7.3h11.6', 'M5.4 2.6v2.3', 'M10.6 2.6v2.3'],
+  chat: ['M13.6 8.3c0 2.5-2.5 4.6-5.6 4.6-.7 0-1.4-.1-2-.3l-3 1.1 1-2.4a4.4 4.4 0 0 1-1.6-3C2.4 5.8 4.9 3.7 8 3.7s5.6 2.1 5.6 4.6z'],
+  clock: ['M8 2.9a5.1 5.1 0 1 1 0 10.2 5.1 5.1 0 0 1 0-10.2z', 'M8 5.5V8l1.9 1.4'],
+  send: ['M13.9 2.6 7.3 9.2', 'M13.9 2.6 9.7 13.9 7.3 9.2 2.6 6.8z'],
+  layers: ['M8 2.5 14 5.4 8 8.3 2 5.4z', 'M2 8.5 8 11.4l6-2.9', 'M2 11.2 8 14.1l6-2.9'],
+  drive: ['M2.2 6.1a1.2 1.2 0 0 1 1.2-1.2h9.2a1.2 1.2 0 0 1 1.2 1.2v5.7a1.2 1.2 0 0 1-1.2 1.2H3.4a1.2 1.2 0 0 1-1.2-1.2z',
+          'M2.2 9.4h11.6', 'M11.1 11.3h.7'],
+  log: ['M3.2 4.6h1.1', 'M3.2 8h1.1', 'M3.2 11.4h1.1',
+        'M6.6 4.6h6.2', 'M6.6 8h6.2', 'M6.6 11.4h6.2'],
 };
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+function icon(name, size = 15) {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('width', size);
+  svg.setAttribute('height', size);
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '1.3');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  svg.setAttribute('aria-hidden', 'true');
+  for (const d of ICONS[name] || []) {
+    const p = document.createElementNS(SVG_NS, 'path');
+    p.setAttribute('d', d);
+    svg.append(p);
+  }
+  return svg;
+}
 
 /* A call that changes the world, rather than reading it. The dot on the
    timeline is green for these and blue for a read, so the shape of a run is
@@ -263,15 +298,16 @@ async function loadWorkspace() {
   renderTree(S.ws);
 }
 
-function section(key, icon, name, items, render, emptyText) {
+function section(key, iconName, name, items, render, emptyText) {
   const d = el('details', 'node');
   d.open = S.open.has(key);
   d.ontoggle = () => d.open ? S.open.add(key) : S.open.delete(key);
 
   const sum = el('summary');
   const count = el('span', 'count', String(items.length));
-  sum.append(el('span', 'caret', '▶'), el('span', 'ico', icon),
-             el('span', 'nm', name), count);
+  const ico = el('span', 'ico');
+  ico.append(icon(iconName));
+  sum.append(el('span', 'caret', '▶'), ico, el('span', 'nm', name), count);
   d.append(sum);
 
   const list = el('div', 'items');
@@ -315,45 +351,46 @@ function renderTree(ws) {
   const tree = $('tree');
   tree.textContent = '';
 
-  tree.append(section('files', '📁', 'files', ws.files, (f) =>
+  tree.append(section('files', 'folder', 'files', ws.files, (f) =>
     itemNode(`<b>${esc(f.name)}</b>`, `${bytes(f.size)} · ${ago(f.mtime)}`,
              () => openFile(f.name)),
     'nothing created yet'));
 
-  tree.append(section('inbox', '📥', 'inbox', ws.emails, (e) =>
+  tree.append(section('inbox', 'inbox', 'inbox', ws.emails, (e) =>
     itemNode(`<b>${esc(e.subject)}</b>`, `${e.from} · ${e.date}`,
              () => openEmail(e)),
     'inbox empty'));
 
-  tree.append(section('calendar', '📅', 'calendar', ws.events, (v) =>
+  tree.append(section('calendar', 'calendar', 'calendar', ws.events, (v) =>
     itemNode(`<b>${esc(v.title)}</b>`,
              `${v.date} · ${v.start}–${v.end}${v.location ? ' · ' + v.location : ''}` +
              (v.attendees && v.attendees.length ? ` · ${v.attendees.join(', ')}` : '')),
     'no events'));
 
-  tree.append(section('messages', '💬', 'messages', ws.messages, (m) =>
+  tree.append(section('messages', 'chat', 'messages', ws.messages, (m) =>
     itemNode(`to <b>${esc(m.to)}</b>`, clip(m.text, 160)),
     'none sent'));
 
-  tree.append(section('reminders', '⏰', 'reminders', ws.reminders, (r) =>
+  tree.append(section('reminders', 'clock', 'reminders', ws.reminders, (r) =>
     itemNode(esc(r.text), `${r.date} at ${r.time}`),
     'none set'));
 
-  tree.append(section('sent', '📤', 'sent mail', ws.sent, (m) =>
+  tree.append(section('sent', 'send', 'sent mail', ws.sent, (m) =>
     itemNode(`<b>${esc(m.subject || '(no subject)')}</b>`, `to ${m.to} · ${clip(m.body, 90)}`,
              () => openViewer(m.subject || 'Sent mail', mailBody({ ...m, from: 'you' }))),
     'nothing sent'));
 
-  tree.append(section('memory', '🧠', 'memory', ws.memory, (f) =>
+  tree.append(section('memory', 'layers', 'memory', ws.memory, (f) =>
     itemNode(esc(f), null), 'nothing learned yet'));
 
   if (ws.tree) {
-    tree.append(section('real', '💽', 'working folder', ws.tree, (f) =>
-      itemNode((f.dir ? '📂 ' : '') + esc(f.name), f.dir ? null : bytes(f.size || 0)),
+    tree.append(section('real', 'drive', 'working folder', ws.tree, (f) =>
+      itemNode((f.dir ? icon('folder', 13).outerHTML + ' ' : '') + esc(f.name),
+               f.dir ? null : bytes(f.size || 0)),
       'empty'));
   }
 
-  tree.append(section('runs', '📜', 'past runs', ws.logs || [], (l) =>
+  tree.append(section('runs', 'log', 'past runs', ws.logs || [], (l) =>
     itemNode(esc(l.name.replace('.json', '')), ago(l.mtime), () => openLog(l.name)),
     'no runs yet'));
 
