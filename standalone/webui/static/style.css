@@ -359,6 +359,7 @@ body:not(.ws-open) .splitter { display: none; }
    Removed the moment the split returns, because there the pane width is
    already the measure. */
 body:not(.ws-open) .feed-in,
+body:not(.ws-open) .thread-log,
 body:not(.ws-open) .runbar,
 body:not(.ws-open) .presets,
 body:not(.ws-open) .composer { max-width: 760px; margin-inline: auto; }
