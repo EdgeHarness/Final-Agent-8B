@@ -587,12 +587,25 @@ const panes = {
 };
 const allCount = el('span', 'count', '0');
 
-function makeTab(label, cls, onSelect) {
+function makeTab(label, cls, onSelect, onClose) {
   const tab = el('button', 'tab' + (cls ? ' ' + cls : ''));
   tab.type = 'button';
   tab.setAttribute('role', 'tab');
   tab.append(document.createTextNode(label));
-  tab.onclick = onSelect;
+  if (onClose) {
+    /* A span, not a nested button: a button inside a button is invalid and
+       screen readers disagree about what it announces. Keyboard users get
+       Delete on the focused tab instead, which is what a tablist is expected
+       to do anyway. */
+    const x = el('span', 'x', '✕');
+    x.setAttribute('aria-hidden', 'true');
+    tab.append(x);
+    tab.title = `${label} — click ✕ or press Delete to close`;
+    tab.dataset.closable = '1';
+    tab.onclick = (ev) => (ev.target === x ? onClose() : onSelect());
+  } else {
+    tab.onclick = onSelect;
+  }
   $('tabs').append(tab);
   return tab;
 }
@@ -605,6 +618,11 @@ $('tabs').addEventListener('keydown', (ev) => {
   const tabs = [...$('tabs').querySelectorAll('.tab')];
   const i = tabs.indexOf(document.activeElement);
   if (i < 0) return;
+  if ((ev.key === 'Delete' || ev.key === 'Backspace') && tabs[i].dataset.closable) {
+    ev.preventDefault();
+    // the ✕ is a span, so this is the keyboard's only way to close a tab
+    return void closeArtifact(tabs[i].firstChild.textContent);
+  }
   const to = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: tabs.length - 1 }[ev.key];
   if (to === undefined) return;
   ev.preventDefault();
@@ -618,6 +636,10 @@ panes.all.tab.append(allCount);
 panes.ws.tab = makeTab('Workspace', null, () => select('ws'));
 
 function select(name) {
+  // A closed tab is dismissed, never deleted: the file is still on disk and
+  // still in the workspace tree. So every route back here - a thumbnail, an
+  // end-card row, a touched chip - rebuilds it rather than selecting nothing.
+  if (!panes[name]) return void showArtifact(name);
   for (const [k, v] of Object.entries(panes)) {
     const on = k === name;
     v.pane.classList.toggle('on', on);
@@ -658,7 +680,7 @@ async function showArtifact(name, stat) {
   pane.append(renderPreview(payload));
   $('canvas').append(pane);
 
-  const tab = makeTab(name, 'new', () => select(name));
+  const tab = makeTab(name, 'new', () => select(name), () => closeArtifact(name));
 
   /* The same renderers again, into a small box. They size themselves from
      their container, so there is no separate thumbnail code path to keep in
@@ -674,15 +696,37 @@ async function showArtifact(name, stat) {
   thumb.onclick = () => select(name);
   $('grid-all').append(thumb);
 
-  panes[name] = { pane, tab, stat: capStat };
-  const made = Object.keys(panes).length - 2;
+  panes[name] = { pane, tab, thumb, stat: capStat };
+  paintArtifactCounts();
+  select(name);
+  setTimeout(() => tab.classList.remove('new'), 950);
+}
+
+function paintArtifactCounts() {
+  const made = Object.keys(panes).length - 2;   // less All and Workspace
   allCount.textContent = String(made);
   if (!document.body.classList.contains('ws-open')) {
     $('ws-count').textContent = String(made);
-    $('ws-count').classList.remove('hidden');
+    $('ws-count').classList.toggle('hidden', made === 0);
   }
-  select(name);
-  setTimeout(() => tab.classList.remove('new'), 950);
+}
+
+/* Dismiss, not delete. The file stays on disk and in the workspace tree, and
+   select() rebuilds the pane if anything points back at it. */
+function closeArtifact(name) {
+  const p = panes[name];
+  if (!p) return;
+  const wasOn = p.tab.classList.contains('on');
+  p.tab.remove();
+  p.pane.remove();
+  if (p.thumb) p.thumb.remove();
+  delete panes[name];
+  paintArtifactCounts();
+  if (Object.keys(panes).length === 2) {        // the last one just went
+    $('grid-all').classList.add('hidden');
+    $('holding').classList.remove('hidden');
+  }
+  if (wasOn) select('all');
 }
 
 /* --- what this run touched --- */

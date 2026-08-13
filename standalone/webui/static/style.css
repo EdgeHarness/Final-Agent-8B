@@ -1131,6 +1131,22 @@ pre.raw {
 /* ref 2: Codex keeps its top-level tabs visible whether or not they have
    content. Ours used to appear only as files landed, so early in a run the
    whole right side was one empty box with no hint of what goes there. */
+/* The ✕ holds its space always, so a tab does not resize under the cursor and
+   shove its neighbours sideways mid-click. It only becomes visible on hover or
+   when the tab is the selected one. */
+.tab .x {
+  display: inline-flex; align-items: center; justify-content: center;
+  /* flex: none, or it shrinks: .tab is a flex container and the ✕ is the item
+     with nothing to protect it. Measured at 7.6px wide before this. */
+  flex: 0 0 16px; height: 16px; margin-right: -4px;
+  border-radius: var(--r-full);
+  font-size: 10px; line-height: 1; color: var(--ink-faint);
+  opacity: 0; transition: opacity .12s ease, background .12s ease, color .12s ease;
+}
+.tab:hover .x, .tab.on .x, .tab:focus-visible .x { opacity: 1; }
+.tab .x:hover { background: var(--panel-2); color: var(--ink); }
+@media (hover: none) { .tab .x { opacity: 1; } }   /* touch has no hover to reveal it */
+
 .tab .count {
   font-size: var(--t-meta); color: var(--ink-faint);
   font-variant-numeric: tabular-nums;
