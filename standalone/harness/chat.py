@@ -122,13 +122,20 @@ def prompt_block(msgs, k=DEFAULT_TURNS):
     the message list is the strongest possible cue for a small model to reply
     with prose too. As a block it reads as context; as messages it reads as a
     pattern to continue.
+
+    Prior answers are labelled as a record ("Assistant did:"), never as "You:".
+    First person is itself a pattern to continue: observed live on a 1B, each
+    new done summary opened with the previous turn's summary and appended to it,
+    so by the third turn the answer described the second turn's work plus spam
+    text from an unrelated email. agent.echoes_history catches what survives
+    this, but removing the cue is cheaper than catching every copy downstream.
     """
     msgs = [m for m in msgs if m.get("text")][-k:]
     if not msgs:
         return ""
     lines = []
     for m in msgs:
-        who = "User" if m["role"] == "user" else "You"
+        who = "User" if m["role"] == "user" else "Assistant did"
         text = " ".join(str(m["text"]).split())
         if len(text) > 300:
             text = text[:299] + "…"

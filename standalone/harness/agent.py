@@ -412,6 +412,32 @@ REPLAN_PROMPT = (
     '"<why>"}}]}} - and nothing the task does not need.')
 
 
+ECHO_SPAN = 8   # consecutive words that have to match before it counts as copied
+
+
+def echoes_history(summary, history):
+    """True when the summary contains a run of words copied from the earlier
+    conversation, rather than describing this run.
+
+    Observed live across three turns of one thread: each done summary opened
+    with the previous one and appended to it, so by turn 3 the answer described
+    work from turn 2 plus spam text out of an unrelated email. It compounds,
+    because the summary is stored and becomes the next turn's context.
+
+    A copied SPAN, not shared vocabulary. Two summaries of similar work reuse
+    the same words ("summarized my ... meetings and messaged ..."), and treating
+    that as a copy would question every legitimate follow-up turn.
+    """
+    if not history or not summary:
+        return False
+    hist = " ".join(str(history).lower().split())
+    words = str(summary).lower().split()
+    if len(words) < ECHO_SPAN:
+        return False
+    return any(" ".join(words[i:i + ECHO_SPAN]) in hist
+               for i in range(len(words) - ECHO_SPAN + 1))
+
+
 def planned_tools(plan_text):
     """The tool names out of a rendered plan, in order. plan_step writes each
     step as "N. tool - what", so this reads back what it wrote."""
@@ -529,6 +555,7 @@ def run_harness(llm, world, mem, task_text, history=""):
     mentioned_files = set()
     opened_files = set()
     questioned_files = set()
+    echo_questioned = False
     last_reply = None
     think_streak = 0
 
@@ -582,7 +609,17 @@ def run_harness(llm, world, mem, task_text, history=""):
                                       f"{verdict.get('missing', 'unknown')}. Continue with the next tool call.",
                                       reply)
                         continue
-                ep.done_summary = str(args.get("summary", ""))
+                summary = str(args.get("summary", ""))
+                # Same contract as every other guard: ask once, take the answer.
+                if (history and not echo_questioned
+                        and echoes_history(summary, history)):
+                    echo_questioned = True
+                    give_feedback(
+                        "That summary repeats an answer from earlier in this "
+                        "conversation. Say only what you did in THIS run, in one "
+                        "sentence, then call done again.", reply)
+                    continue
+                ep.done_summary = summary
                 ep.finished = True
                 ep.note("done", ep.done_summary)
                 break

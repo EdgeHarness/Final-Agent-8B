@@ -487,6 +487,53 @@ class _StubLLM:
         return self.reply
 
 
+class TestPromptBlock(unittest.TestCase):
+    def test_prior_answers_are_a_record_not_first_person_prose(self):
+        """"You: <sentence>" is a pattern to continue; a 1B continued it, opening
+        each new summary with the previous one. Cheaper to remove the cue than
+        to catch every copy downstream, so the check and this both ship."""
+        from harness import chat
+        block = chat.prompt_block([{"role": "user", "text": "summarize wednesday"},
+                                   {"role": "assistant", "text": "Summarized three meetings."}])
+        self.assertIn("summarize wednesday", block)
+        self.assertIn("Summarized three meetings.", block)
+        self.assertNotIn("You:", block)
+
+    def test_the_block_is_empty_without_turns(self):
+        from harness import chat
+        self.assertEqual(chat.prompt_block([]), "")
+
+
+class TestEchoesHistory(unittest.TestCase):
+    """A copied span, not incidental word overlap: two summaries of similar work
+    share vocabulary, and questioning that would hound every follow-up turn."""
+
+    def test_a_copied_span_is_an_echo(self):
+        hist = "Assistant did: Summarized my Wednesday meetings and messaged Jordan with the list"
+        self.assertTrue(agent.echoes_history(
+            "Summarized my Wednesday meetings and messaged Jordan with the list. Plus a deck.",
+            hist))
+
+    def test_shared_vocabulary_is_not_an_echo(self):
+        hist = "Assistant did: Summarized my Wednesday meetings and messaged Jordan"
+        self.assertFalse(agent.echoes_history(
+            "Summarized my Thursday meetings and messaged Sam", hist))
+
+    def test_a_short_summary_is_never_an_echo(self):
+        """Under the span length there is nothing to copy: "Booked it." matching
+        is coincidence, and re-asking would be noise on every terse answer."""
+        hist = "Assistant did: Booked it"
+        self.assertFalse(agent.echoes_history("Booked it", hist))
+
+    def test_no_history_means_nothing_to_echo(self):
+        self.assertFalse(agent.echoes_history("anything " * 20, ""))
+
+    def test_case_and_spacing_do_not_hide_a_copy(self):
+        hist = "Assistant did: alpha beta gamma delta epsilon zeta eta theta"
+        self.assertTrue(agent.echoes_history(
+            "ALPHA  beta\ngamma delta epsilon zeta eta theta iota", hist))
+
+
 class TestVerifier(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -924,6 +971,50 @@ class TestLoop(unittest.TestCase):
                             self.call("done", summary="done")])
         agent.run_harness(llm, self.world, self.mem, "Make a sheet")
         self.assertFalse([f for f in llm.seen_feedback if "unrelated.xlsx" in f])
+
+    def test_a_summary_that_repeats_the_last_answer_is_sent_back(self):
+        """Observed live across three turns of one thread: each run's done
+        summary opened with the PREVIOUS run's summary and appended to it, so
+        turn 3 described turn 2's work plus spam text from an unrelated email.
+        It compounds - the contaminated summary is stored and becomes the next
+        turn's context - so each turn is worse than the one before."""
+        agent.set_profile(profiles.replace(profiles.DEFAULT, plan=False, verify_rounds=0))
+        prior = ("\n\nEARLIER IN THIS CONVERSATION:\nUser: summarize wednesday\n"
+                 "Assistant did: Summarized my Wednesday meetings and messaged "
+                 "Jordan with the list of three items")
+        llm = _ScriptedLLM([
+            self.call("done", summary="Summarized my Wednesday meetings and messaged "
+                                      "Jordan with the list of three items. Also built a deck."),
+            self.call("done", summary="Built the deck from Dana's numbers.")])
+        ep = agent.run_harness(llm, self.world, self.mem, "build a deck", history=prior)
+        self.assertEqual(ep.done_summary, "Built the deck from Dana's numbers.")
+        self.assertTrue([f for f in llm.seen_feedback if "only what you did in THIS" in f])
+
+    def test_a_summary_of_its_own_work_is_accepted(self):
+        agent.set_profile(profiles.replace(profiles.DEFAULT, plan=False, verify_rounds=0))
+        prior = ("\n\nEARLIER IN THIS CONVERSATION:\nUser: summarize wednesday\n"
+                 "Assistant did: Summarized my Wednesday meetings and messaged Jordan")
+        llm = _ScriptedLLM([self.call("done", summary="Built the deck from Dana's numbers.")])
+        ep = agent.run_harness(llm, self.world, self.mem, "build a deck", history=prior)
+        self.assertEqual(ep.done_summary, "Built the deck from Dana's numbers.")
+        self.assertFalse([f for f in llm.seen_feedback if "only what you did in THIS" in f])
+
+    def test_the_echo_check_is_asked_once_and_then_accepts(self):
+        """Question, never forbid: a model that insists gets its summary."""
+        agent.set_profile(profiles.replace(profiles.DEFAULT, plan=False, verify_rounds=0))
+        prior = "\n\nEARLIER:\nAssistant did: alpha beta gamma delta epsilon zeta eta theta"
+        echo = self.call("done", summary="alpha beta gamma delta epsilon zeta eta theta")
+        llm = _ScriptedLLM([echo, echo])
+        ep = agent.run_harness(llm, self.world, self.mem, "t", history=prior)
+        self.assertEqual(ep.done_summary, "alpha beta gamma delta epsilon zeta eta theta")
+        self.assertEqual(len([f for f in llm.seen_feedback
+                              if "only what you did in THIS" in f]), 1)
+
+    def test_a_run_with_no_conversation_behind_it_is_never_checked(self):
+        agent.set_profile(profiles.replace(profiles.DEFAULT, plan=False, verify_rounds=0))
+        llm = _ScriptedLLM([self.call("done", summary="anything at all goes here")])
+        agent.run_harness(llm, self.world, self.mem, "t")
+        self.assertFalse([f for f in llm.seen_feedback if "only what you did in THIS" in f])
 
     def test_a_planned_write_is_never_questioned(self):
         agent.set_profile(profiles.replace(profiles.DEFAULT, plan=True, verify_rounds=0))
