@@ -421,6 +421,40 @@ class TestOffice(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def test_a_slide_whose_title_key_is_a_near_miss_is_repaired(self):
+        """Observed live: a 1B sent {"slide_type": "title_slide"} and the call was
+        rejected, three times, burning six of its eighteen calls in a loop it
+        could not escape. A bare string was already repaired into a title-only
+        slide on exactly the reasoning that rejecting it costs a model call to
+        learn - that argument applies one level deeper too."""
+        for bad, want in (({"heading": "Q3 Results"}, "Q3 Results"),
+                          ({"Title": "Q3 Results"}, "Q3 Results"),
+                          ({"slide_type": "Q3 Results"}, "Q3 Results")):
+            out = office.create_presentation(self.tmp.name, "d.pptx", [bad])
+            self.assertIn("1 slide", out)
+            from pptx import Presentation
+            deck = Presentation(os.path.join(self.tmp.name, "d.pptx"))
+            texts = [sh.text_frame.text for sh in deck.slides[0].shapes if sh.has_text_frame]
+            self.assertIn(want, texts, bad)
+
+    def test_a_slide_with_no_usable_title_is_still_an_error(self):
+        """Repair guesses only where the intent is unambiguous. Inventing a title
+        for {"bullets": [...]} would put words on a slide nobody wrote."""
+        with self.assertRaises(ToolError):
+            office.create_presentation(self.tmp.name, "d.pptx", [{"bullets": ["a", "b"]}])
+
+    def test_the_other_format_s_extension_is_swapped_not_appended(self):
+        """Observed live: create_spreadsheet("q3_sales.pptx") wrote
+        q3_sales.pptx.xlsx, and the UI row said "q3_sales.pptx written" because
+        it shows the argument. A file the user never named, under a name the app
+        never wrote."""
+        office.create_spreadsheet(self.tmp.name, "q3_sales.pptx", [["a"], ["1"]])
+        self.assertEqual(os.listdir(self.tmp.name), ["q3_sales.xlsx"])
+
+    def test_an_unrelated_dot_in_a_name_is_left_alone(self):
+        office.create_spreadsheet(self.tmp.name, "q3.final", [["a"], ["1"]])
+        self.assertEqual(os.listdir(self.tmp.name), ["q3.final.xlsx"])
+
     def test_a_spreadsheet_round_trips_through_the_reader(self):
         office.create_spreadsheet(self.tmp.name, "costs.xlsx",
                                   [["Item", "Cost"], ["Chairs", 400]])

@@ -4,6 +4,7 @@ The files written here are opened again by the graders (and by the human
 reviewer in actual PowerPoint/Excel), so this is genuine capability, not
 a simulation.
 """
+import difflib
 import os
 
 from openpyxl import Workbook, load_workbook
@@ -48,13 +49,53 @@ def _bullet_size(n):
     return 20 if n <= 5 else (17 if n <= 8 else 14)
 
 
+_OFFICE_EXTS = (".pptx", ".xlsx", ".docx", ".ppt", ".xls", ".doc", ".csv")
+
+
 def _resolve(files_dir, filename, ext):
     if not filename or not isinstance(filename, str):
         raise ToolError(f"'filename' must be a string ending in {ext}")
     name = os.path.basename(filename.strip())
     if not name.lower().endswith(ext):
+        # SWAP another office extension, do not append to it. Observed live: a
+        # 1B called create_spreadsheet("q3_sales.pptx") and got q3_sales.pptx.xlsx
+        # on disk, while the tool row in the UI said "q3_sales.pptx written"
+        # because it renders the argument. A file under a name nobody chose.
+        # Any other dot is left alone - "q3.final" is a name, not an extension.
+        stem, dot, tail = name.rpartition(".")
+        if dot and ("." + tail.lower()) in _OFFICE_EXTS:
+            name = stem
         name += ext
     return os.path.join(files_dir, name), name
+
+
+def _repair_slide(s):
+    """Find the title a slide object obviously meant, or leave it alone.
+
+    Same contract as the harness's argument repair, one level deeper: rename a
+    near-miss key rather than spend a model call teaching the model the schema.
+    Observed live, a 1B sent {"slide_type": "title_slide"}, was rejected three
+    times, and burned six of its eighteen calls in a loop it could not escape.
+
+    Only where the intent is unambiguous. A slide carrying bullets and no title
+    is NOT repaired: inventing one puts words on a slide nobody wrote.
+    """
+    if not isinstance(s, dict) or "title" in s:
+        return s
+    out = dict(s)
+    for key in list(out):
+        if key.lower() == "title":                    # "Title", "TITLE"
+            out["title"] = out.pop(key)
+            return out
+    near = difflib.get_close_matches("title", [k for k in out], n=1, cutoff=0.6)
+    if near:
+        out["title"] = out.pop(near[0])
+        return out
+    # One string value and nothing else it could be: that string is the title.
+    strings = [k for k, v in out.items() if isinstance(v, str) and v.strip()]
+    if len(strings) == 1 and "bullets" not in out:
+        out["title"] = out.pop(strings[0])
+    return out
 
 
 def create_presentation(files_dir, filename, slides):
@@ -65,6 +106,7 @@ def create_presentation(files_dir, filename, slides):
     # The same value repair for slides: a bare string is a title-only slide,
     # unambiguously, and rejecting it costs a model call to learn that.
     slides = [{"title": s} if isinstance(s, str) else s for s in slides]
+    slides = [_repair_slide(s) for s in slides]
     prs = Presentation()
     prs.slide_width, prs.slide_height = Inches(13.333), Inches(7.5)  # 16:9
     W, H = prs.slide_width, prs.slide_height
