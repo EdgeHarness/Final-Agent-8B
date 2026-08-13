@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1520 860" width="1520" height="860"
+     font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif">
+<title>AgentLab poster</title>
+<desc>A left to right flow from a plain instruction through the harness and its tools to
+finished work, with three headline figures beneath.</desc>
+
+<style>
+  .page  { fill: #f7f8fa; }
+  .card  { fill: #ffffff; stroke: #e3e6ec; }
+  .accent{ fill: #3355ff; }
+  .h1    { fill: #0f172a; font-size: 72px; font-weight: 800; letter-spacing: -1.6px; }
+  .sub   { fill: #64748b; font-size: 23px; }
+  .stage { fill: #0f172a; font-size: 30px; font-weight: 750; }
+  .stagew{ fill: #ffffff; font-size: 30px; font-weight: 750; }
+  .cap   { fill: #64748b; font-size: 15.5px; }
+  .capw  { fill: #c7d2fe; font-size: 15.5px; }
+  .big   { fill: #3355ff; font-size: 76px; font-weight: 800; letter-spacing: -1.5px; }
+  .claim { fill: #0f172a; font-size: 19px; font-weight: 700; }
+  .under { fill: #64748b; font-size: 15.5px; }
+  .foot  { fill: #94a3b8; font-size: 14.5px;
+           font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+</style>
+
+<rect class="page" x="0" y="0" width="1520" height="860"/>
+
+<text class="h1"  x="68" y="118">Your laptop, doing the work.</text>
+<text class="sub" x="68" y="166">An 8B model that runs a real inbox, calendar and documents. Nothing leaves the machine.</text>
+
+<!-- the flow -->
+<rect class="card"   x="68"   y="250" width="298" height="150" rx="14" stroke-width="1.3"/>
+<text class="stage"  x="104"  y="316">You ask</text>
+<text class="cap"    x="104"  y="350">in plain language</text>
+
+<path class="accent" d="M392 315 L424 325 L392 335 Z"/>
+
+<rect class="accent" x="430"  y="250" width="298" height="150" rx="14"/>
+<text class="stagew" x="466"  y="316">The harness</text>
+<text class="capw"   x="466"  y="350">repair · question · verify</text>
+
+<path class="accent" d="M754 315 L786 325 L754 335 Z"/>
+
+<rect class="card"   x="792"  y="250" width="298" height="150" rx="14" stroke-width="1.3"/>
+<text class="stage"  x="828"  y="316">16 tools</text>
+<text class="cap"    x="828"  y="350">mail · calendar · files</text>
+
+<path class="accent" d="M1116 315 L1148 325 L1116 335 Z"/>
+
+<rect class="card"   x="1154" y="250" width="298" height="150" rx="14" stroke-width="1.3"/>
+<text class="stage"  x="1190" y="316">Done</text>
+<text class="cap"    x="1190" y="350">booked · drafted · written</text>
+
+<!-- the one line that matters -->
+<text class="claim" x="68" y="480" font-size="27">A small model gets the intent right and the format wrong.</text>
+<text class="under" x="68" y="516" font-size="21">The harness fixes the format for free, and spends a model call only on a real decision.</text>
+
+<!-- headline figures -->
+<line x1="68" y1="580" x2="1452" y2="580" stroke="#e3e6ec" stroke-width="1.4"/>
+
+<text class="big"   x="68"   y="690">0</text>
+<text class="claim" x="68"   y="726">Prompts that leave the laptop</text>
+<text class="under" x="68"   y="754">Every token is generated on-device</text>
+
+<text class="big"   x="560"  y="690">69 → 10</text>
+<text class="claim" x="560"  y="726">Tools loaded when you connect Outlook</text>
+<text class="under" x="560"  y="754">Context is the budget; the harness curates it</text>
+
+<text class="big"   x="1120" y="690">4</text>
+<text class="claim" x="1120" y="726">Dependencies</text>
+<text class="under" x="1120" y="754">No agent framework, no build step</text>
+
+<text class="foot" x="68" y="822">Python + vanilla JavaScript &#183; Ollama on loopback &#183; MCP over JSON-RPC</text>
+</svg>

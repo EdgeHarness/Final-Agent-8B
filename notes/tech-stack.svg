@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1520 860" width="1520" height="860"
+     font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif">
+<title>Tech stack</title>
+<desc>Four cards describing the stack: local model, Python core, plain web UI, and real reach.</desc>
+
+<style>
+  .page  { fill: #f7f8fa; }
+  .card  { fill: #ffffff; stroke: #e8eaef; }
+  .bar   { fill: #3355ff; }
+  .num   { fill: #3355ff; font-size: 31px; font-weight: 800; }
+  .h1    { fill: #0f172a; font-size: 45px; font-weight: 800; letter-spacing: -0.5px; }
+  .sub   { fill: #64748b; font-size: 19px; }
+  .ct    { fill: #0f172a; font-size: 19px; font-weight: 700; }
+  .body  { fill: #4b5563; font-size: 15.5px; }
+  .mono  { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #64748b; font-size: 14px; }
+</style>
+
+<rect class="page" x="0" y="0" width="1520" height="860"/>
+
+<text class="h1"  x="68" y="112">The Stack</text>
+<text class="sub" x="68" y="160">Four layers, deliberately few dependencies, nothing that needs a build step</text>
+
+<!-- card 1 -->
+<rect class="bar"  x="68" y="240" width="324" height="6" rx="3"/>
+<rect class="card" x="68" y="246" width="324" height="470" rx="10" stroke-width="1.2"/>
+<text class="num"  x="102" y="300">01</text>
+<text class="ct"   x="102" y="352">Local Model</text>
+<text class="body" x="102" y="392">Ollama serves Llama 3.1 8B</text>
+<text class="body" x="102" y="418">over loopback. Every token is</text>
+<text class="body" x="102" y="444">generated on this machine, so</text>
+<text class="body" x="102" y="470">no prompt ever leaves it.</text>
+<text class="mono" x="102" y="516">127.0.0.1:11434</text>
+
+<!-- card 2 -->
+<rect class="bar"  x="421" y="240" width="324" height="6" rx="3"/>
+<rect class="card" x="421" y="246" width="324" height="470" rx="10" stroke-width="1.2"/>
+<text class="num"  x="455" y="300">02</text>
+<text class="ct"   x="455" y="352">Python Core</text>
+<text class="body" x="455" y="392">The harness, the tools and the</text>
+<text class="body" x="455" y="418">local server are standard</text>
+<text class="body" x="455" y="444">library plus requests. No agent</text>
+<text class="body" x="455" y="470">framework, nothing to learn.</text>
+<text class="mono" x="455" y="516">3,000 lines, 13 modules</text>
+
+<!-- card 3 -->
+<rect class="bar"  x="774" y="240" width="324" height="6" rx="3"/>
+<rect class="card" x="774" y="246" width="324" height="470" rx="10" stroke-width="1.2"/>
+<text class="num"  x="808" y="300">03</text>
+<text class="ct"   x="808" y="352">Plain Web UI</text>
+<text class="body" x="808" y="392">Vanilla HTML, CSS and</text>
+<text class="body" x="808" y="418">JavaScript. No framework, no</text>
+<text class="body" x="808" y="444">build step. Each run streams</text>
+<text class="body" x="808" y="470">live over server-sent events.</text>
+<text class="mono" x="808" y="516">pywebview wraps it as an app</text>
+
+<!-- card 4 -->
+<rect class="bar"  x="1127" y="240" width="324" height="6" rx="3"/>
+<rect class="card" x="1127" y="246" width="324" height="470" rx="10" stroke-width="1.2"/>
+<text class="num"  x="1161" y="300">04</text>
+<text class="ct"   x="1161" y="352">Real Reach</text>
+<text class="body" x="1161" y="392">Mail and calendars arrive over</text>
+<text class="body" x="1161" y="418">MCP, spoken as JSON-RPC to</text>
+<text class="body" x="1161" y="444">off-the-shelf servers. Decks and</text>
+<text class="body" x="1161" y="470">sheets are written directly.</text>
+<text class="mono" x="1161" y="516">python-pptx &#183; openpyxl</text>
+
+<text class="sub" x="68" y="790" font-size="16">Four pip packages in total. The only thing you install to run it is Ollama.</text>
+</svg>
