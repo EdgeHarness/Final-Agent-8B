@@ -13,7 +13,7 @@ that governs it.
 > succeed differently.
 
 The runner resolves and installs it before the loop starts
-([run_agent.py:133-135](../run_agent.py#L133-L135)):
+([run_agent.py:199-201](../standalone/agents/8b/run_agent.py#L199-L201)):
 
 ```python
 profile = profiles.for_model(cfg["model"], cfg.get("harness"))
@@ -75,7 +75,7 @@ The curve is not monotonic. Scaffolding is not a ladder you climb — a 1B and a
 2. same base family — `llama3.2:1b-instruct-q4` finds `llama3.2:1b`'s family
 3. `DEFAULT`, so an unrecognised model still runs
 
-A `harness` block in [config.json](../config.json) then patches individual
+A `harness` block in [config.json](../standalone/agents/8b/config.json) then patches individual
 fields, filtered against the dataclass so an unknown key is ignored rather than
 crashing. This folder's config sets none, so `llama3.1:8b` gets stock
 **balanced**.

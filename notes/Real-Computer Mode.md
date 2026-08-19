@@ -26,7 +26,7 @@ The module docstring states the threat model plainly:
 ## Extra rules injected
 
 The runner appends `REAL_RULES` to the system prompt
-([run_agent.py:49-57](../run_agent.py#L49-L57)):
+([run_agent.py:65-73](../standalone/agents/8b/run_agent.py#L65-L73)):
 
 - **Look before you write** — call `list_dir` or `read_file` first, so you
   change the file that actually exists instead of one you assumed.
@@ -56,7 +56,7 @@ the agent's own `harness\`. Reads are unaffected — this is a write guard only.
 > inert and the root scope is doing all the work. See [[Open Questions]].
 
 **3 — Confirmation.** Overwrite, delete, move and shell each go through the
-runner's `y/N` prompt ([run_agent.py:118-123](../run_agent.py#L118-L123)). A
+runner's `y/N` prompt ([run_agent.py:150-155](../standalone/agents/8b/run_agent.py#L150-L155)). A
 decline raises a `ToolError` phrased *at the model*: "the user declined the
 {action}. Do not retry it; choose another approach." `--yolo` passes
 `confirm=None`, which makes `_ask()` return `True` unconditionally.
@@ -67,7 +67,7 @@ Output is clipped throughout — 200 KB read cap, 4,000-character observations,
 ## Clock switch
 
 `--root` also swaps the fixed benchmark clock for the real system date
-([run_agent.py:155-157](../run_agent.py#L155-L157)) — a real-file agent should
+([run_agent.py:240-242](../standalone/agents/8b/run_agent.py#L240-L242)) — a real-file agent should
 reason about today, not about 2026-07-20. This is the one place real mode gives
 up [[Determinism|reproducibility]], deliberately.
 

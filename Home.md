@@ -40,16 +40,20 @@ same call budget, ten pieces of scaffolding added or removed.
 
 ## Folder layout
 
-Two copies of the same agent live here:
+Everything that runs lives under `standalone/`:
 
-| path | state |
+| path | what |
 |---|---|
-| `run_agent.py`, `config.json`, `run.ps1`, `memory/` at the root | **not runnable** — imports resolve outside this folder |
-| `standalone/agents/8b/` + `standalone/harness/` | **complete** — the runnable copy, harness included |
+| `standalone/agents/8b/` | the agent: config, runner, its workspace and memory |
+| `standalone/harness/` | the loop, the tools, the safety layers |
+| `standalone/webui/` | [[Agent Lab]] — the local console |
+| `standalone/mcp/` | the [[Real Accounts\|real-account]] server registry and its self-test |
+| `standalone/npu/` | the [[NPU Serving\|Hexagon NPU]] shim |
 
-See [[Running the Agent]] for why. `standalone/harness/` is the interesting
-reading: ~2,100 lines across eleven modules, and the only place the actual loop
-behaviour is defined.
+`standalone/harness/` is the interesting reading: ~2,100 lines across eleven
+modules, and the only place the actual loop behaviour is defined. A second,
+non-runnable copy of the agent used to sit at the repo root; it was deleted on
+2026-08-19, see [[Running the Agent]].
 
 ## Vault layout
 

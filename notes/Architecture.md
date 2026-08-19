@@ -26,18 +26,18 @@ for why there are two copies of the agent folder.
 
 ## What the runner owns
 
-[run_agent.py](../run_agent.py) is a thin shell, byte-identical across every
-model-size folder; only [config.json](../config.json) differs. It:
+[run_agent.py](../standalone/agents/8b/run_agent.py) is a thin shell, byte-identical across every
+model-size folder; only [config.json](../standalone/agents/8b/config.json) differs. It:
 
 1. reads the config and asserts the Ollama URL is local
-   ([run_agent.py:129](../run_agent.py#L129))
+   ([run_agent.py:195](../standalone/agents/8b/run_agent.py#L195))
 2. resolves the [[Harness Profiles|profile]] for the model and installs it
-   ([run_agent.py:133-135](../run_agent.py#L133-L135))
+   ([run_agent.py:199-201](../standalone/agents/8b/run_agent.py#L199-L201))
 3. parses [[Flags|flags]] and settles the LLM call budget
 4. opens `workspace/` as a **persistent** [[Persistent State|world]] and
    `memory/memory.jsonl`
 5. builds a plain `LLM` or a tiered [[Model Tiers|ModelRouter]]
-   ([run_agent.py:99-115](../run_agent.py#L99-L115))
+   ([run_agent.py:131-147](../standalone/agents/8b/run_agent.py#L131-L147))
 6. calls `run_harness(llm, world, mem, task)`
 7. prints what happened and writes `logs/run_NNN.json`
 

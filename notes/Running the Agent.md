@@ -4,25 +4,28 @@ tags: [howto]
 
 # Running the Agent
 
-## Two copies, one of them runnable
+## Where the runner lives
 
-[run_agent.py](../run_agent.py) computes its import root as
-`dirname(dirname(HERE))` ([run_agent.py:36-38](../run_agent.py#L36-L38)) — it
-expects to sit at `<project>/agents/<size>/` with `<project>/harness/` beside it.
+The agent runs from `standalone/agents/8b/`. There is one copy, and it is that
+one.
 
-| copy | resolved project root | `harness/` there? |
-|---|---|---|
-| `./run_agent.py` | `/Users/sharv/Documents/Work` | **no** — imports fail |
-| `./standalone/agents/8b/run_agent.py` | `./standalone` | **yes** |
+[run_agent.py](../standalone/agents/8b/run_agent.py) computes its import root as
+`dirname(dirname(HERE))`
+([run_agent.py:50-52](../standalone/agents/8b/run_agent.py#L50-L52)), so it has
+to sit at `<project>/agents/<size>/` with `<project>/harness/` beside it —
+which is exactly where it is, resolving `standalone/` as the project root.
 
-The two runners are byte-identical (`diff` is clean), as are the configs. Only
-the position in the tree differs. **Run the `standalone/agents/8b/` copy**; treat
-the root-level files as a stray flat copy, or delete them.
+> [!note] There used to be a second copy
+> `run_agent.py`, `config.json`, `run.ps1` and `memory/` also sat at the repo
+> root. That copy resolved its import root *above* the repo, so it could never
+> import `harness/` and never ran; it had also drifted a hundred lines behind
+> on the MCP work. It was deleted on 2026-08-19. Links in these notes point at
+> the runnable copy.
 
 ## Invoking it
 
-As shipped ([run.ps1](../run.ps1)) it targets a Windows lab machine and a pinned
-interpreter:
+As shipped ([run.ps1](../standalone/agents/8b/run.ps1)) it targets a Windows lab
+machine and a pinned interpreter:
 
 ```powershell
 & "C:\Users\Lab User\SAIL\python\python.exe" (Join-Path $PSScriptRoot "run_agent.py") @args
@@ -72,7 +75,7 @@ A healthy run prints, before any model call:
 Those numbers come from the `llama3.1:8b` entry in
 [profiles.py:119-126](../standalone/harness/profiles.py#L119-L126) — see
 [[Harness Profiles]]. If the endpoint is not loopback the runner asserts out
-before any of it ([run_agent.py:129](../run_agent.py#L129)).
+before any of it ([run_agent.py:195](../standalone/agents/8b/run_agent.py#L195)).
 
 ## What to expect at 8B
 

@@ -59,7 +59,7 @@ as world-changing ([agent.py:356](../standalone/harness/agent.py#L356)):
 [[Real-Computer Mode]] adds `list_dir`, `read_file`, `write_file`,
 `append_file`, `delete_path`, `move_path`, `search_files` — plus `run_command`
 with `--shell`. The office tools are **dropped**
-(`fs_tools.restrict_to_files()`, [run_agent.py:150](../run_agent.py#L150)) — a
+(`fs_tools.restrict_to_files()`, [run_agent.py:235](../standalone/agents/8b/run_agent.py#L235)) — a
 fake inbox is a known distraction for a small model doing real work.
 `--with-office` keeps both sets. The meta tools (`think`, `save_memory`,
 `recall_memories`, `done`) survive either way.

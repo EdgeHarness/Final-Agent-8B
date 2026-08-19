@@ -7,7 +7,7 @@ cssclasses: [topic-core]
 
 `--tiers` routes calls through
 [model_router.py](../standalone/harness/model_router.py) instead of the plain
-`LLM` client ([run_agent.py:99-115](../run_agent.py#L99-L115)). `ModelRouter` is
+`LLM` client ([run_agent.py:131-147](../standalone/agents/8b/run_agent.py#L131-L147)). `ModelRouter` is
 a drop-in for `LLM` — same `.chat(messages, force_json=, num_predict=, role=)`
 and the same `.calls` / `.output_tokens` / `.wall` counters — so
 [[Agent Loop|run_harness]] accepts either object unchanged, and the shared
@@ -59,8 +59,8 @@ are swallowed (`except OSError: pass`) so a read-only disk cannot kill a run.
 
 ## Config-driven alternative
 
-A `router` block in [config.json](../config.json) enables the router without the
-flag ([run_agent.py:104](../run_agent.py#L104)) and can pin `base`, `small`,
+A `router` block in [config.json](../standalone/agents/8b/config.json) enables the router without the
+flag ([run_agent.py:136](../standalone/agents/8b/run_agent.py#L136)) and can pin `base`, `small`,
 `deep`, or a full `roles` map. This folder's config has no such block.
 
 ## The LoRA seam

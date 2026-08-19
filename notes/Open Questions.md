@@ -25,7 +25,7 @@ Windows-only.
 
 ## Run-log numbering collides
 
-`n = len(os.listdir(log_dir)) + 1` ([run_agent.py:205](../run_agent.py#L205))
+`n = len(os.listdir(log_dir)) + 1` ([run_agent.py:308](../standalone/agents/8b/run_agent.py#L308))
 counts *files*, not runs. With [[Model Tiers|--tiers]], `model_calls.jsonl`
 takes a slot, so numbering jumps. Delete a log and the next run silently
 overwrites an existing `run_NNN.json`. Max-of-existing-indices, or a timestamp
@@ -34,7 +34,7 @@ name, would be safer.
 ## Unknown flags become task text
 
 `parse_flags()` appends anything unrecognised to the task
-([run_agent.py:93-95](../run_agent.py#L93-L95)), so `--tier` (typo) is not an
+([run_agent.py:125-127](../standalone/agents/8b/run_agent.py#L125-L127)), so `--tier` (typo) is not an
 error — it becomes part of the prompt. Cheap fix: reject leading-`--` tokens.
 
 ## Verifier fails open, silently

@@ -11,7 +11,7 @@ Two runs of the same task against the same state produce the same trajectory.
 |---|---|---|
 | temperature | `0.0` | `LLM` default, [llm.py:20](../standalone/harness/llm.py#L20) |
 | seed | `42` | hard-coded in every payload, [llm.py:48](../standalone/harness/llm.py#L48) |
-| `num_ctx` | [config.json](../config.json), else the [[Harness Profiles\|profile]] | 8192 here |
+| `num_ctx` | [config.json](../standalone/agents/8b/config.json), else the [[Harness Profiles\|profile]] | 8192 here |
 | decode format | `format=json` when `force_json` | harness loop only |
 | `keep_alive` | `30m` | model stays warm between calls |
 | simulated clock | **Monday, 2026-07-20** | [world.py:12](../standalone/harness/world.py#L12) |
@@ -29,7 +29,7 @@ baseline.
 ## Where determinism breaks, on purpose
 
 - **[[Real-Computer Mode|--root]]** swaps in the real system date
-  ([run_agent.py:155-157](../run_agent.py#L155-L157)). A real-file agent should
+  ([run_agent.py:240-242](../standalone/agents/8b/run_agent.py#L240-L242)). A real-file agent should
   reason about today. Real-mode runs are therefore not reproducible across days,
   and that is the intended trade.
 - **`deep` tier** ([[Model Tiers]]) is the one role with a non-zero temperature

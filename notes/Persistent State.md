@@ -6,7 +6,7 @@ cssclasses: [topic-core]
 # Persistent State
 
 The world is opened with `persistent=True`
-([run_agent.py:161](../run_agent.py#L161)) — the benchmark uses
+([run_agent.py:262](../standalone/agents/8b/run_agent.py#L262)) — the benchmark uses
 `persistent=False` and gets fresh fixtures every episode, so runs accumulate
 only for the on-device agents.
 
@@ -61,7 +61,7 @@ Delete `workspace/state.json` and `memory/memory.jsonl`.
 ## Log numbering
 
 The run-log index is `len(os.listdir(log_dir)) + 1`
-([run_agent.py:205](../run_agent.py#L205)) — a *file count*, not a max of
+([run_agent.py:308](../standalone/agents/8b/run_agent.py#L308)) — a *file count*, not a max of
 existing run numbers. `logs/model_calls.jsonl` occupies a slot in that count, so
 with `--tiers` the numbering skips ahead by one, and deleting an old log makes
 the next run overwrite an existing transcript. See [[Open Questions]].

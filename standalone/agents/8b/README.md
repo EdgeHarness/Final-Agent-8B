@@ -1,16 +1,30 @@
-# Agent 8B — `llama3.1:8b`
+# Agent 8B
 
-The reference agent. Same code, same tools, same harness as the other four
-folders; only `config.json` differs.
+The agent folder. `run_agent.py` is a thin shell over `harness/`; this folder
+owns the config, the workspace, the memory and the run logs.
 
 ```json
-{ "name": "Agent 8B", "model": "llama3.1:8b", "num_ctx": 8192 }
+{
+  "name": "Agent 8B",
+  "model": "ai-hub-models/Llama-v3.1-8B-Instruct",
+  "mcp": { "enable": ["ms365-personal"], "mode": "draft" }
+}
 ```
 
-Everything is on-device. Inference goes to the local Ollama server at
-`127.0.0.1:11434` (weights under `C:\Users\Lab User\SAIL\ollama`); the runner
-asserts the endpoint is loopback and refuses anything else. All state stays in
-this folder. Nothing leaves the machine.
+Everything is on-device. The runner asserts its endpoint is loopback and refuses
+anything else. All state stays in this folder. Nothing leaves the machine.
+
+Two backends serve that model, and both answer on `127.0.0.1:11434`:
+
+| backend | how | model tag |
+|---|---|---|
+| Ollama, CPU | `make ollama-up` | `llama3.1:8b` |
+| GenieX, Hexagon NPU | `make npu-up && make shim` | `ai-hub-models/Llama-v3.1-8B-Instruct` |
+
+The tag in `config.json` has to match the backend that is actually running —
+GenieX knows only its own model ids and 404s on an Ollama tag. Same weights
+either way, so the harness profile is identical; see `../../../notes/NPU
+Serving.md`.
 
 ```powershell
 cd agents\8b
@@ -38,15 +52,16 @@ run.ps1
        └─ harness/agent.py       run_harness(): the loop described below
 ```
 
-`run_agent.py` in this folder is byte-identical to `agents/_shared/run_agent.py`
-and to the copy in every other size folder. It:
+`run_agent.py` is a thin shell; it carries no loop behaviour of its own. It:
 
-1. reads `config.json`, asserts the Ollama URL is local,
-2. parses flags, decides the LLM call budget (14 simulated, 40 with `--root`),
-3. opens `workspace/` as a **persistent** world and `memory/memory.jsonl`,
-4. builds either a plain `LLM` or a tiered `ModelRouter`,
-5. calls `run_harness(llm, world, mem, task)`,
-6. prints what happened and writes `logs/run_NNN.json`.
+1. reads `config.json`, asserts the model URL is local,
+2. resolves the harness profile for the model and installs it,
+3. parses flags, decides the LLM call budget (50 simulated — the profile's —
+   lifted to at least 40 with `--root` or `--mcp`),
+4. opens `workspace/` as a **persistent** world and `memory/memory.jsonl`,
+5. builds either a plain `LLM` or a tiered `ModelRouter`,
+6. calls `run_harness(llm, world, mem, task)`,
+7. prints what happened and writes `logs/run_NNN.json`.
 
 Determinism: `temperature=0`, `seed=42`, `num_ctx` from config. Two runs of the
 same task against the same state produce the same trajectory.
@@ -217,7 +232,12 @@ the seam where a `llama-server` backend plus trained GGUF adapters plugs in.
 | `--small TAG` | cheaper model for routing/verify (implies `--tiers`) |
 | `--deep TAG` | on-demand heavy tier (implies `--tiers`) |
 | `--with-office` | keep the simulated office tools alongside the file tools |
-| `--max-calls N` | LLM call budget (default 14 simulated, 40 with `--root`) |
+| `--max-calls N` | LLM call budget (default 50 simulated, at least 40 with `--root` or `--mcp`) |
+| `--mcp LIST` | real accounts over MCP — `gmail`, `gcal`, `ms365`, `teams`, `ms365-work` |
+| `--mcp-live` | allow send/reply tools. Default is draft: the model composes, a human sends |
+| `--mcp-read-only` | drop every world-changing MCP tool |
+| `--mcp-list` | start the named servers, print the tools they expose, exit |
+| `--mcp-help` | print setup steps for every known server, exit |
 
 ---
 
