@@ -129,6 +129,42 @@ PROFILES = {
         repeat_limit=3, think_streak_cap=2, num_predict=700, memory_k=3,
         num_ctx=8192, max_calls=50),
 
+    # --- The Hexagon NPU, served by GenieX -----------------------------------
+    # GenieX reports its own model ids (`ai-hub-models/...`), and npu/ollama_shim
+    # substitutes that id for the config.json tag on every call, so these keys
+    # must match what `geniex serve` lists — not an Ollama tag.
+    #
+    # NEITHER is re-tuned. AI Hub quantisation is not Q4_0, so before trusting
+    # them check parse_failures and invalid_calls in the run log — the signal
+    # notes/NPU Serving.md calls out for exactly this step.
+    #
+    # Llama 3.1 8B is the same weights the balanced profile was tuned against on
+    # Ollama, so the NPU run stays a backend comparison rather than a model
+    # change, and Phase 2's measurement means something.
+    "ai-hub-models/Llama-v3.1-8B-Instruct": Profile(
+        label="balanced (NPU)",
+        rationale="Llama 3.1 8B on the Hexagon NPU via GenieX — the same model the "
+                  "Ollama profile was tuned for, so the full harness applies "
+                  "unchanged: real planning, two verify rounds, standard budget. "
+                  "Only the backend differs, which is the point of the comparison.",
+        plan=True, plan_max_steps=5, verify_rounds=2, loop_break=True,
+        repeat_limit=3, think_streak_cap=2, num_predict=700, memory_k=3,
+        num_ctx=8192, max_calls=20),
+
+    # Fallback if the Llama bundle is licence-gated on this machine: Qwen 2.5 7B
+    # is pullable without a grant. Same class of model, so it inherits the same
+    # profile — but it is a different model, so a run measured on it is NOT a
+    # like-for-like comparison against the Ollama baseline.
+    "ai-hub-models/Qwen2.5-7B-Instruct": Profile(
+        label="balanced (NPU)",
+        rationale="Qwen 2.5 7B Instruct on the Hexagon NPU via GenieX. Good "
+                  "instruction-following, JSON and tool calls, so the full harness "
+                  "pays off as it does for the 8B: real planning, two verify "
+                  "rounds, standard budget.",
+        plan=True, plan_max_steps=5, verify_rounds=2, loop_break=True,
+        repeat_limit=3, think_streak_cap=2, num_predict=700, memory_k=3,
+        num_ctx=8192, max_calls=20),
+
     # --- Qwen 2.5 14B -------------------------------------------------------
     "qwen2.5:14b": Profile(
         label="structured-reasoner",

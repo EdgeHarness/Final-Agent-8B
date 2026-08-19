@@ -46,68 +46,70 @@ Every NPU runtime below speaks **OpenAI's** `/v1/chat/completions`, not
 Ollama's. So the work splits cleanly:
 
 ```
-[ NPU runtime ]  --OpenAI-->  [ shim ]  --Ollama-->  [ harness, unchanged ]
-                                :11434
+[ GenieX :18181 ]  --OpenAI-->  [ shim ]  --Ollama-->  [ harness, unchanged ]
+                                  :11434
 ```
 
-**The shim is the whole integration.** No agent code changes, no profile
-changes, no webui changes. That adapter used to exist as `ollama_shim.py` and
-was deleted in `0af900a`; restore it as the first step rather than writing it
-again:
-
-```bash
-git checkout b3c948f -- standalone/llamacpp/ollama_shim.py
-git mv standalone/llamacpp/ollama_shim.py standalone/npu/ollama_shim.py
-```
-
-It already handles the translation the harness needs: `options.num_predict` →
-`max_tokens`, `format: "json"` → `response_format`, SSE → Ollama's NDJSON,
+**The shim is the whole integration.** No agent code changes, no webui changes.
+It lives at `standalone/npu/ollama_shim.py` — recovered from `b3c948f`, where it
+had been deleted in `0af900a`, then repointed at GenieX. It handles the
+translation the harness needs: `options.num_predict` → `max_tokens`,
+`format: "json"` → `response_format`, SSE → Ollama's NDJSON,
 `prompt_eval_count`/`eval_count` from `usage`.
+
+The one thing that is not zero-change is the model tag: GenieX serves
+`ai-hub-models/...` ids, so `agents/8b/config.json` and
+[[Harness Profiles|profiles.py]] name that id, and the shim substitutes it on
+every call.
 
 ## 3. Three routes
 
-### Route A — Foundry Local (recommended first)
+### Route A — GenieX (chosen)
 
-Microsoft's on-device runtime. GA since April 2026. It detects the Snapdragon
-NPU, picks the QNN execution provider automatically, and **already exposes an
-OpenAI-compatible REST API** — so there is no model export step and no SDK
-install.
+Qualcomm's own runtime, and the route this repo now implements. GenieX is the
+open build of Genie: it reaches the Hexagon NPU through AI Engine Direct (QNN),
+and it ships **both** an installer and an OpenAI-compatible server, so neither
+the export step nor the HTTP wrapper this note used to budget for exists any
+more.
+
+```powershell
+# installer from github.com/qualcomm/GenieX (Windows ARM64), then:
+geniex pull ai-hub-models/Llama-v3.1-8B-Instruct
+geniex serve --compute npu --nctx 8192      # http://127.0.0.1:18181/v1
+```
+
+Models published to AI Hub are **pre-compiled per chipset**, so `geniex pull`
+fetches a binary already built for X Elite. That removes the three costs this
+note previously attributed to the Genie route — no AI Hub account, no
+compilation on Qualcomm's cloud, no `qai_hub_models.export` — for any model in
+the bundle catalogue.
+
+What survives: **Llama weights are still licence-gated.** If the pull is
+refused, either clear the grant or fall back to
+`ai-hub-models/Qwen2.5-7B-Instruct`, which has a profile registered for exactly
+this case. Prefer Llama where possible — it is the model the balanced profile
+was tuned on, so the NPU run stays a backend comparison rather than a model
+change.
+
+`--compute` also takes `hybrid` (per-tensor HTP+CPU scheduler) against `npu`
+(pinned to one HTP session). Measure both in Phase 2; on a 7–8B the scheduler
+sometimes wins.
+
+### Route B — Foundry Local (fallback)
+
+Microsoft's on-device runtime. GA since April 2026, detects the NPU, picks the
+QNN execution provider itself, also OpenAI-compatible.
 
 ```powershell
 winget install Microsoft.FoundryLocal
-foundry model run phi-4-mini      # or another QNN-optimised model
-foundry service status            # prints the local OpenAI endpoint
+foundry model run phi-4-mini
+foundry server status -o json     # ephemeral port, so always ask
 ```
 
-Then point the shim at that endpoint. **This is the shortest path to a working
-NPU-served agent** — plausibly a single afternoon.
-
-Cost: you run whatever models Foundry ships QNN variants of, not necessarily
-`llama3.1:8b`. That changes which [[Harness Profiles|profile]] applies.
-
-### Route B — Qualcomm AI Hub → Genie (most control)
-
-Qualcomm's own stack. Compile the model to QNN context binaries ahead of time,
-then serve with Genie from the QAIRT SDK. This is what Qualcomm's published
-numbers use.
-
-```powershell
-pip install qai-hub-models
-qai-hub configure --api_token <token>
-
-python -m qai_hub_models.models.llama_v3_1_8b_instruct.export `
-  --device "Snapdragon X Elite CRD" `
-  --skip-inferencing --skip-profiling `
-  --output-dir genie_bundle
-```
-
-Produces context binaries split across five parts. Serve with `genie-t2t-run`
-from QAIRT, or use **GenieX**, the community build that adds an
-OpenAI-compatible server — which removes the need to write a Genie HTTP wrapper
-by hand.
-
-Cost: an AI Hub account, a Hugging Face licence grant for Llama weights,
-compilation on Qualcomm's cloud (not local), and a large download.
+Comparable effort to Route A now, but a worse fit here: you run whatever models
+Microsoft ships QNN variants of, which does not include `llama3.1:8b`, so every
+run becomes a model change *and* a backend change at once. Keep it as the
+fallback if GenieX will not serve on this machine.
 
 ### Route C — ONNX Runtime GenAI + QNN EP (most work)
 
@@ -124,35 +126,40 @@ Take this only if A and B both fail to produce a usable model.
 dummy OpenAI endpoint and confirm the harness still completes a run. *This
 phase is testable with no NPU involved.*
 
-**Phase 1 — Foundry Local.** Install, serve a QNN model, point the shim at it,
-run `run_agent.py` with no flags changed. Success = a run finishes cleanly.
+**Phase 1 — GenieX.** Install, `geniex pull` the Llama 3.1 8B bundle, `geniex
+serve --compute npu --nctx 8192`, start the shim, run `run_agent.py` with no
+flags changed. Success = a run finishes cleanly.
 
-**Phase 2 — measure.** Same task, three backends: Ollama/CPU, Foundry/NPU, and
-(if built) Genie/NPU. Record prefill and decode separately — they behave very
-differently here — plus wall time, and CPU utilisation during the run.
+**Phase 2 — measure.** Same task, same model, three backends: Ollama/CPU,
+GenieX `--compute npu`, GenieX `--compute hybrid`. Record prefill and decode
+separately — they behave very differently here — plus wall time, and CPU
+utilisation during the run. Because the model is identical across all three,
+any difference is the backend.
 
-**Phase 3 — Genie, only if Phase 2 justifies it.** Export Llama 3.1 8B, serve
-via GenieX, re-measure. This is the route that gets the exact model the
-[[Harness Profiles|balanced profile]] was tuned for.
-
-**Phase 4 — re-tune.** NPU quantisation is not Q4_0. Re-check JSON validity and
+**Phase 3 — re-tune.** AI Hub quantisation is not Q4_0. Re-check JSON validity and
 tool-call reliability before trusting the profile; `parse_failures` and
 `invalid_calls` in the run log are the signal.
 
 ## 5. Known constraints
 
-- **Context length is baked into the context binary** on the Genie route. The
-  harness's `num_ctx 8192` becomes a compile-time decision, not a flag — a
-  harder version of the constraint `ollama_shim.py` already documents for
-  `llama-server`.
+- **Context is fixed at load, and the default is wrong for us.** `geniex serve`
+  defaults to `--nctx 4096`; every profile in `profiles.py` asks for 8192 or
+  more. The shim cannot fix this — it deliberately does not forward `num_ctx`,
+  because the runtime decides it. Pass `--nctx` to match the profile or long
+  runs truncate silently. On a pre-compiled QNN bundle the ceiling is baked into
+  the binary, so this is a hard limit, not a flag.
+- **One model in memory at a time.** GenieX evicts on load, and after
+  `--keepalive` seconds idle (default 300). Fine within a run; it means the
+  `--tiers` router cannot hold several models resident the way Ollama does.
 - **Quantisation tooling is x86_64-only.** ONNX quantisation utilities do not
   install cleanly on ARM64, so Route C needs a separate x64 Python or a
   different machine to prepare assets.
-- **Llama weights are restricted** — no direct download, you export them
-  yourself through AI Hub with a Hugging Face grant.
-- **Model choice narrows.** Only models with QNN variants run on the NPU. The
-  agent's `--tiers` router, which assumes several interchangeable Ollama tags,
-  will not have them.
+- **Llama weights are licence-gated.** Pre-compiled bundles remove the export
+  step but not the grant. See Route A for the fallback.
+- **Model choice narrows.** Only models in the AI Hub bundle catalogue (or GGUF
+  at Q4_0, which has the best Hexagon support on the llama.cpp runtime) reach
+  the NPU. The agent's `--tiers` router assumes several interchangeable Ollama
+  tags and will not have them.
 - **Which chip.** The tuning assumed X1E (12 cores, ~135 GB/s). If the Yoga is
   actually X2 Elite (18 cores, ~228 GB/s, 80 TOPS), every roofline figure and
   thread count changes. Confirm before measuring — see [[Open Questions]].
@@ -191,8 +198,11 @@ the result will look like a regression when it is a trade.
 
 ## Sources
 
+- [qualcomm/GenieX](https://github.com/qualcomm/GenieX) — install, `pull`, `serve`
+- [GenieX — local OpenAI-compatible server](https://deepwiki.com/qualcomm/GenieX/3.3-local-openai-compatible-server) — `serve` flags, endpoints, single-model constraint
+- [GenieX — what it is](https://geniex.aihub.qualcomm.com/en/get-started/what-is-geniex)
 - [Qualcomm AI Hub — Llama-v3.1-8B-Instruct](https://aihub.qualcomm.com/models/llama_v3_1_8b_instruct)
-- [ai-hub-apps — llm_on_genie tutorial](https://github.com/qualcomm/ai-hub-apps/tree/main/tutorials/llm_on_genie)
+- [ai-hub-apps — llm_on_genie tutorial](https://github.com/quic/ai-hub-apps/tree/main/tutorials/llm_on_genie) — the manual export route, if a bundle is unavailable
 - [Foundry Local — get started](https://learn.microsoft.com/en-us/windows/ai/foundry-local/get-started)
 - [ONNX Runtime — run on Snapdragon](https://onnxruntime.ai/docs/genai/tutorials/snapdragon.html)
 - [ONNX Runtime — build model assets for Snapdragon NPU](https://onnxruntime.ai/docs/genai/howto/build-models-for-snapdragon.html)
