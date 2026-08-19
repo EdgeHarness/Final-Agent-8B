@@ -103,6 +103,30 @@ simulated office inbox is removed so the model can't confuse it with the real
 one. If that passes on a fresh machine, the harness side is correct and any
 remaining problem is credentials.
 
+## When the model can't get the arguments right
+
+A tool the model *has* is not a tool it can *call*. `create-draft-email` takes
+the entire Graph message under one `body` argument — 25 top-level keys, with
+recipients and `start`/`end` behind JSON Schema `$ref`s. Two things were wrong:
+
+- **`$ref` was never resolved**, so `toRecipients` rendered as `array` with no
+  item shape at all.
+- **nested objects rendered as the bare word `object`**, so the model saw
+  `body: object` and invented the rest.
+
+Both are fixed in `_type_desc` / `_deref`, and enum values now appear inline
+(`"text"|"html"`). Two registry keys go with it:
+
+| key | what it does |
+|---|---|
+| `arg_hints` | `{tool: args}` — a correct, measured example call, used verbatim as the tool's example. Beats anything derived from the schema. |
+| `hide_params` | optional params never worth showing a model (`includeHeaders`, `excludeResponse`, `confirm`). Pure context savings. |
+
+The observed failures these fix, both from one real run: `body` sent as a
+string, then `contentType: "Text"` rejected — because this server's enum is
+lowercase `text`/`html` **even though Microsoft Graph's own documentation
+capitalises it**. Read shapes off `inputSchema`, never off the vendor docs.
+
 ## Watch the tool count
 
 An 8B at `num_ctx` 8192 carries every tool's name, description and parameters in
@@ -120,6 +144,20 @@ options. The registry's `allow` list cuts that to **10**:
 
 Narrow server-side with the server's own `--preset` first, then the registry's
 `allow` list. `mcp_config.count_warnings()` warns past 25.
+
+**Ten tools is still not cheap.** Measured against the live server, those ten
+cost **~4,260 tokens of an 8,192 context** — about half the window gone before
+the task is read:
+
+    desc      5,717 chars  (~1,429 tok)   <- the server's own text
+    params   10,177 chars  (~2,544 tok)
+    example   1,159 chars  (~289 tok)
+
+`hide_params` took the params column down from 12,740 chars, and resolving
+`$ref`s cost only ~100 chars on top of that. The rest is structural: it is ten
+tools' worth of OData query parameters, and the only real lever left is a
+narrower `allow` list. If the agent is losing the thread on long tasks, cut the
+tool list before blaming the model.
 
 That same run is where the registry's `write_tools` entries come from.
 `copy-mail-message`, `dismiss-calendar-event-reminder` and

@@ -201,20 +201,120 @@ def _clip(text, limit=OBS_CLIP):
     return text if len(text) <= limit else text[:limit] + " ...[truncated]"
 
 
-def _placeholder(schema):
-    t = (schema or {}).get("type")
+# Read-only / derived fields every Graph entity carries. Rendering them wastes
+# the context an 8B does not have, and no model should ever set them.
+_SCHEMA_NOISE = {"id", "createdDateTime", "lastModifiedDateTime", "changeKey",
+                 "etag", "@odata.etag", "@odata.type", "categories"}
+_TYPE_DESC_CLIP = 300
+
+
+def _deref(node, root, seen=()):
+    """Follow a local $ref, e.g. '#/$defs/def1'.
+
+    Not optional: ms-365-mcp-server puts every recipient and every start/end
+    behind $defs, so without this `toRecipients` and `start` render as bare
+    'array'/'any' and the model invents a shape. Measured, not guessed — that
+    is where the create-draft-email failures came from."""
+    for _ in range(8):
+        if not isinstance(node, dict):
+            return {}
+        ref = node.get("$ref")
+        if not isinstance(ref, str) or not ref.startswith("#/"):
+            return node
+        if ref in seen:
+            return {}                      # cyclic $ref — stop rather than recurse
+        seen = (*seen, ref)
+        target = root
+        for part in ref[2:].split("/"):
+            part = part.replace("~1", "/").replace("~0", "~")
+            target = (target or {}).get(part) if isinstance(target, dict) else None
+            if target is None:
+                return {}
+        node = target
+    return node if isinstance(node, dict) else {}
+
+
+def _type_desc(node, root, depth=0, max_depth=2, max_keys=6):
+    """Compact one-line type: enum values and nested keys, not just 'object'.
+
+    A bare 'object' tells the model nothing, so it guesses the nesting and the
+    server rejects it. Depth and key count are capped because this lands in the
+    system prompt of a model with an 8k context."""
+    node = _deref(node, root)
+    for branch in (node.get("anyOf") or node.get("oneOf") or []):
+        b = _deref(branch, root)
+        if b.get("type") != "null":
+            return _type_desc(b, root, depth, max_depth, max_keys)
+    if node.get("enum"):
+        return "|".join(json.dumps(v, ensure_ascii=False) for v in node["enum"][:6])
+    t = node.get("type")
+    if isinstance(t, list):
+        t = next((x for x in t if x != "null"), "any")
+    if not t:
+        t = "object" if node.get("properties") else "any"
+    if t == "object" and depth < max_depth:
+        props = {k: v for k, v in (node.get("properties") or {}).items()
+                 if k not in _SCHEMA_NOISE}
+        keys = list(props)[:max_keys]
+        if keys:
+            inner = ", ".join(f"{k}: {_type_desc(props[k], root, depth + 1, max_depth, max_keys)}"
+                              for k in keys)
+            return "{" + inner + (", ..." if len(props) > len(keys) else "") + "}"
+    if t == "array":
+        # The array wrapper does NOT consume a depth level: charging one made
+        # `toRecipients` render as '[object]', hiding the very shape the model
+        # gets wrong. It is a container, not a level of nesting.
+        return "[" + _type_desc(node.get("items"), root, depth, max_depth, max_keys) + "]"
+    return t
+
+
+def _placeholder(schema, root=None, depth=0):
+    node = _deref(schema, root if root is not None else {})
+    for branch in (node.get("anyOf") or node.get("oneOf") or []):
+        b = _deref(branch, root or {})
+        if b.get("type") != "null":
+            node = b
+            break
+    if node.get("enum"):
+        return node["enum"][0]
+    t = node.get("type")
+    if isinstance(t, list):
+        t = next((x for x in t if x != "null"), None)
+    if not t:
+        t = "object" if node.get("properties") else None
+    if t == "object" and depth < 2:
+        props = {k: v for k, v in (node.get("properties") or {}).items()
+                 if k not in _SCHEMA_NOISE}
+        return {k: _placeholder(props[k], root, depth + 1) for k in list(props)[:3]}
+    if t == "array" and depth < 2:
+        item = _placeholder(node.get("items"), root, depth + 1)
+        return [item] if item != "..." else []
     return {"string": "...", "number": 0, "integer": 0,
             "boolean": True, "array": [], "object": {}}.get(t, "...")
 
 
-def _params_from_schema(schema):
-    """MCP inputSchema (JSON Schema) -> harness params {name: (type_desc, required)}."""
+def _params_from_schema(schema, root=None, hint=None, hide=()):
+    """MCP inputSchema (JSON Schema) -> harness params {name: (type_desc, required)}.
+
+    Every character here lands in the system prompt of a model with an 8k
+    context, so a parameter already demonstrated by the example renders as a
+    pointer instead of a second, longer copy of the same shape."""
+    root = schema if root is None else root
     props = (schema or {}).get("properties") or {}
     required = set((schema or {}).get("required") or [])
+    hinted = set(hint or ())
+    hidden = {h.lower() for h in hide}
     out = {}
     for pname, pschema in props.items():
         pschema = pschema or {}
-        t = pschema.get("type", "any")
+        if pname.lower() in hidden and pname not in required:
+            continue          # server plumbing: costs context, never set by a model
+        if pname in hinted:
+            t = "object — use the shape in the example exactly"
+        else:
+            t = _type_desc(pschema, root)
+            if len(t) > _TYPE_DESC_CLIP:
+                t = t[:_TYPE_DESC_CLIP - 3] + "..."
         desc = str(pschema.get("description", "")).strip().replace("\n", " ")
         if len(desc) > 120:
             desc = desc[:117] + "..."
@@ -223,10 +323,18 @@ def _params_from_schema(schema):
     return out
 
 
-def _example_for(harness_name, schema):
+def _example_for(harness_name, schema, hint=None):
+    """A correct call the model can copy.
+
+    A registry `arg_hints` entry wins over anything derived from the schema:
+    these servers expose the whole Graph entity (25 top-level keys on a draft),
+    so a generated example picks the first few keys, not the ones a human
+    actually needs. The hint is the measured, working shape."""
+    if hint:
+        return {"tool": harness_name, "args": hint}
     props = (schema or {}).get("properties") or {}
     required = (schema or {}).get("required") or list(props)[:2]
-    args = {r: _placeholder(props.get(r)) for r in list(required)[:3]}
+    args = {r: _placeholder(props.get(r), schema) for r in list(required)[:3]}
     return {"tool": harness_name, "args": args}
 
 
@@ -276,10 +384,12 @@ def _register(client, tool, server_cfg, prefix, draft_only, seen_names):
     schema = tool.get("inputSchema") or {}
     desc = str(tool.get("description", "")).strip().replace("\n", " ")
     tag = "[real, needs confirmation] " if is_write else "[real, read-only] "
+    hint = (server_cfg.get("arg_hints") or {}).get(mcp_name)
     TOOLS[harness_name] = {
         "desc": tag + (desc or mcp_name),
-        "params": _params_from_schema(schema),
-        "example": _example_for(harness_name, schema),
+        "params": _params_from_schema(schema, hint=hint,
+                                      hide=server_cfg.get("hide_params") or ()),
+        "example": _example_for(harness_name, schema, hint),
         "run": _make_executor(client, mcp_name, is_write),
     }
     seen_names.add(harness_name)

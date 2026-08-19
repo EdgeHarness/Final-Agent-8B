@@ -50,7 +50,7 @@ TOOL_BUDGET_WARN = 25
 # Keys mcp_bridge.enable() understands. Everything else in a registry entry is
 # documentation and is stripped before launch.
 _BRIDGE_KEYS = {"id", "command", "args", "env", "cwd", "prefix", "allow", "drop",
-                "read_tools", "write_tools", "mode"}
+                "read_tools", "write_tools", "mode", "arg_hints", "hide_params"}
 
 
 class ConfigError(Exception):

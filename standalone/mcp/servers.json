@@ -93,7 +93,32 @@
     "write_tools": ["copy-mail-message", "dismiss-calendar-event-reminder",
                     "snooze-calendar-event-reminder"],
     "read_tools": ["get-mailbox-settings"],
+    "hide_params": ["includeHeaders", "excludeResponse", "confirm"],
+    "arg_hints": {
+      "create-draft-email": {
+        "body": {
+          "subject": "Meeting request",
+          "toRecipients": [{"emailAddress": {"address": "someone@example.com"}}],
+          "body": {"contentType": "text", "content": "Hi — are you free Thursday?"}
+        }
+      },
+      "create-calendar-event": {
+        "body": {
+          "subject": "Deep work",
+          "start": {"dateTime": "2026-08-14T15:00:00", "timeZone": "UTC"},
+          "end": {"dateTime": "2026-08-14T16:00:00", "timeZone": "UTC"},
+          "attendees": [{"emailAddress": {"address": "someone@example.com"},
+                         "type": "required"}]
+        }
+      }
+    },
     "notes": [
+      "arg_hints exist because these two tools take the WHOLE Graph entity under",
+      "a single 'body' argument — 25 top-level keys, with recipients and",
+      "start/end behind $defs $refs. Observed failures without them: 'body' sent",
+      "as a string, then contentType 'Text' rejected because the server's enum is",
+      "lowercase 'text'|'html' even though Graph's own docs capitalise it. The",
+      "shapes above were read off the live server's inputSchema, not the docs.",
       "Measured, not guessed: `--mcp ms365 --mcp-list` against the real server",
       "returns 69 tools even with --preset mail,calendar. That is far past what",
       "an 8B can hold in an 8k context, so the allow list above cuts it to ten.",
@@ -133,7 +158,28 @@
     "write_tools": ["copy-mail-message", "dismiss-calendar-event-reminder",
                     "snooze-calendar-event-reminder"],
     "read_tools": ["get-mailbox-settings"],
+    "hide_params": ["includeHeaders", "excludeResponse", "confirm"],
+    "arg_hints": {
+      "create-draft-email": {
+        "body": {
+          "subject": "Meeting request",
+          "toRecipients": [{"emailAddress": {"address": "someone@example.com"}}],
+          "body": {"contentType": "text", "content": "Hi — are you free Thursday?"}
+        }
+      },
+      "create-calendar-event": {
+        "body": {
+          "subject": "Deep work",
+          "start": {"dateTime": "2026-08-14T15:00:00", "timeZone": "UTC"},
+          "end": {"dateTime": "2026-08-14T16:00:00", "timeZone": "UTC"},
+          "attendees": [{"emailAddress": {"address": "someone@example.com"},
+                         "type": "required"}]
+        }
+      }
+    },
     "notes": [
+      "See 'ms365' for why arg_hints are here: contentType is lowercase",
+      "'text'|'html', and the whole message goes under one 'body' argument.",
       "Use this, not 'ms365', for a personal Microsoft account. The server's own",
       "auth.js carries the reason: as of June 2026 Microsoft rejects tokens issued",
       "to personal accounts through the default 'common' authority, so the tenant",
