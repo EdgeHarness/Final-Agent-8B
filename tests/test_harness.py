@@ -388,8 +388,23 @@ class TestGuardRegistry(unittest.TestCase):
                                 agent.world_changing_tools(), plan)
 
     def test_every_guard_has_a_name_and_a_callable(self):
-        for name, check in agent.GUARDS:
+        for name, check in agent.GUARDS + agent.DONE_GUARDS:
             self.assertTrue(name and callable(check), name)
+
+    def test_the_done_phase_guard_is_registered_like_the_rest(self):
+        """It was inline for a long time, carrying a comment reading "same
+        contract as every other guard" while sitting outside the list every
+        other guard was in. So it could not be ablated, could not be counted,
+        and did not label its own nudge in the UI."""
+        self.assertIn("done_echo", [n for n, _ in agent.DONE_GUARDS])
+        self.assertNotIn("done_echo", [n for n, _ in agent.GUARDS],
+                         "it runs at the done boundary, not on a tool call")
+
+    def test_ablating_a_done_guard_works_through_the_config(self):
+        cfg = agent.RunConfig().without_guard("done_echo")
+        self.assertEqual([n for n, _ in cfg.done_guards], [])
+        self.assertEqual(len(cfg.guards), len(agent.GUARDS),
+                         "the call-time guards must be untouched")
         self.assertEqual([n for n, _ in agent.GUARDS],
                          ["wrong_date", "unplanned_write", "unread_file",
                           "read_before_write"])
@@ -1169,12 +1184,20 @@ class TestBenchGraders(unittest.TestCase):
 
     def test_every_registered_guard_has_a_scripted_failure(self):
         """A guard with no script cannot be ablated meaningfully on this
-        machine, because no installed model reaches its failure."""
+        machine, because no installed model reaches its failure. Covers the
+        done-phase guards too, which is how the unregistered one was found."""
         fired = set()
         for task_id in bench_tasks.SCRIPTS:
             fired.update(self._scripted("harness", task_id)["guards_fired"])
-        for name, _ in agent.GUARDS:
+        for name, _ in agent.GUARDS + agent.DONE_GUARDS:
             self.assertIn(name, fired, f"no scripted failure fires {name}")
+
+    def test_the_echo_guard_fires_and_can_be_ablated(self):
+        self.assertIn("done_echo",
+                      self._scripted("harness", "echo_summary")["guards_fired"])
+        self.assertNotIn("done_echo",
+                         self._scripted("harness-no-done_echo",
+                                        "echo_summary")["guards_fired"])
 
     def test_the_date_guard_fires_on_the_day_the_task_did_not_name(self):
         self.assertIn("wrong_date", self._scripted("harness", "deep_work")["guards_fired"])

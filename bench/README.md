@@ -46,6 +46,9 @@ message that commits to neither passes.** That is the lenient direction, which
 is the right way round for a grader reading free text: it will miss a wrong
 answer phrased unusually, and it will not invent a failure.
 
+A task may also carry `history`, prior conversation turns. `echo_summary` needs
+it: there is nothing to echo without an earlier turn to echo from.
+
 A task's `setup` receives both the world and the memory store, because a memory
 seeded anywhere else is never injected and the task would grade a run that never
 saw the stale fact.
@@ -163,6 +166,7 @@ reaches its failure.
 | `export_copied` | `unread_file` |
 | `deep_work` | `wrong_date` |
 | `read_only` | `unplanned_write` |
+| `echo_summary` | `done_echo` |
 
 Removing a guard empties exactly its cell in the guards-that-spoke table and
 leaves the others alone. That is the ablation working.

@@ -411,28 +411,32 @@ class RunConfig:
     reason to happen.
     """
 
-    __slots__ = ("max_calls", "profile", "extra_rules", "extra_write_tools", "guards")
+    __slots__ = ("max_calls", "profile", "extra_rules", "extra_write_tools",
+                 "guards", "done_guards")
 
     def __init__(self, max_calls=None, profile=None, extra_rules=None,
-                 extra_write_tools=None, guards=None):
+                 extra_write_tools=None, guards=None, done_guards=None):
         self.max_calls = MAX_CALLS if max_calls is None else max_calls
         self.profile = PROFILE if profile is None else profile
         self.extra_rules = EXTRA_RULES if extra_rules is None else extra_rules
         self.extra_write_tools = (set(EXTRA_WRITE_TOOLS) if extra_write_tools is None
                                   else set(extra_write_tools))
         self.guards = list(GUARDS) if guards is None else list(guards)
+        self.done_guards = (list(DONE_GUARDS) if done_guards is None
+                            else list(done_guards))
 
     def without_guard(self, name):
         """A copy with one cross-check removed. This is the ablation the rig
         needs, and it no longer requires patching anything."""
         return RunConfig(self.max_calls, self.profile, self.extra_rules,
                          self.extra_write_tools,
-                         [g for g in self.guards if g[0] != name])
+                         [g for g in self.guards if g[0] != name],
+                         [g for g in self.done_guards if g[0] != name])
 
     def __repr__(self):
         return (f"RunConfig(max_calls={self.max_calls}, "
                 f"profile={getattr(self.profile, 'name', '?')}, "
-                f"guards={[n for n, _ in self.guards]})")
+                f"guards={[n for n, _ in self.guards + self.done_guards]})")
 
 PLAN_PROMPT = ('Which tools will you need to call to complete this task, in order? '
                'Reply with one JSON object: {"steps": [{"tool": "<tool_name>", "what": "<5 words>"}, ...]}. '
@@ -600,6 +604,13 @@ class GuardState:
         self.mentioned_files = set()
         self.opened_files = set()
         self.questioned_files = set()
+        # The done phase. summary and history are set at the done boundary;
+        # they are None for every call-time guard and that is deliberate, so a
+        # call-time guard reading them is a loud AttributeError rather than a
+        # silent None.
+        self.summary = None
+        self.history = ""
+        self.echo_questioned = False
 
     def is_write(self):
         return self.name in self.write_tools
@@ -709,6 +720,25 @@ def guard_read_before_write(g):
             f"genuinely do not need it, call {g.name} again and it will run.")
 
 
+def guard_done_echo(g):
+    """A done summary that copies an eight-word span out of an earlier turn.
+
+    Left alone it compounds, because the summary is stored and becomes the next
+    turn's context, so a run can end by quoting its own previous ending back at
+    itself for as long as the conversation lasts.
+
+    Runs at the DONE boundary rather than on a tool call, which is why it lives
+    in DONE_GUARDS. Same contract as every other guard: ask once, take the
+    answer."""
+    if not (g.history and not g.echo_questioned
+            and echoes_history(g.summary, g.history)):
+        return None
+    g.echo_questioned = True
+    return ("That summary repeats an answer from earlier in this "
+            "conversation. Say only what you did in THIS run, in one "
+            "sentence, then call done again.")
+
+
 # Order matters and is stated here rather than buried in statement order.
 # A domain pack appends its own; every entry gets the same contract.
 GUARDS = [
@@ -716,6 +746,18 @@ GUARDS = [
     ("unplanned_write", guard_unplanned_write),
     ("unread_file", guard_unread_file),
     ("read_before_write", guard_read_before_write),
+]
+
+# Guards that run at the DONE boundary instead of on a tool call. A separate
+# list because they take different inputs, not because they follow a different
+# contract: question once, never forbid, denial monotonic, exactly as above.
+#
+# This one was inline for a long time, with a comment reading "same contract as
+# every other guard" while sitting outside the list every other guard was in.
+# So the claim that every guard was registered was true of the call-time four
+# and false of this one, and it could not be ablated or counted.
+DONE_GUARDS = [
+    ("done_echo", guard_done_echo),
 ]
 
 
@@ -793,7 +835,6 @@ def run_harness(llm, world, mem, task_text, history="", cfg=None):
     # test can call directly. The reasoning behind each field is on the guard
     # that uses it.
     g = GuardState(llm, world, ep, messages, task_text, write_tools, plan, cfg)
-    echo_questioned = False
     last_reply = None
     think_streak = 0
 
@@ -847,16 +888,15 @@ def run_harness(llm, world, mem, task_text, history="", cfg=None):
                                       f"{verdict.get('missing', 'unknown')}. Continue with the next tool call.",
                                       reply)
                         continue
-                summary = str(args.get("summary", ""))
-                # Same contract as every other guard: ask once, take the answer.
-                if (history and not echo_questioned
-                        and echoes_history(summary, history)):
-                    echo_questioned = True
-                    give_feedback(
-                        "That summary repeats an answer from earlier in this "
-                        "conversation. Say only what you did in THIS run, in one "
-                        "sentence, then call done again.", reply)
+                g.summary = str(args.get("summary", ""))
+                g.history = history
+                questioned = run_guards(g, cfg.done_guards)
+                if questioned:
+                    guard_name, message = questioned
+                    ep.note("guard", guard_name)
+                    give_feedback(message, reply)
                     continue
+                summary = g.summary
                 ep.done_summary = summary
                 ep.finished = True
                 ep.note("done", ep.done_summary)

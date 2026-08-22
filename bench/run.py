@@ -77,7 +77,8 @@ def config_for(arm, max_calls, profile):
 
 def arms_for(names=None):
     """raw, harness, and one ablation per registered guard."""
-    all_arms = ["raw", "harness"] + [f"harness-no-{n}" for n, _ in agent.GUARDS]
+    all_arms = ["raw", "harness"] + [
+        f"harness-no-{n}" for n, _ in agent.GUARDS + agent.DONE_GUARDS]
     if not names:
         return all_arms
     unknown = [n for n in names if n not in all_arms]
@@ -107,7 +108,10 @@ def run_one(arm, task, model, max_calls, profile):
         if arm == "raw":
             ep = agent.run_raw(llm, world, mem, task["text"], cfg=cfg)
         else:
-            ep = agent.run_harness(llm, world, mem, task["text"], cfg=cfg)
+            # A task may carry prior conversation. The done-echo guard needs it:
+            # there is nothing to echo without an earlier turn to echo from.
+            ep = agent.run_harness(llm, world, mem, task["text"],
+                                   history=task.get("history", ""), cfg=cfg)
     except Exception as exc:                 # noqa: BLE001 - a crash is a datum
         ep, error = None, f"{type(exc).__name__}: {exc}"
     passed, reason = task["check"](world)

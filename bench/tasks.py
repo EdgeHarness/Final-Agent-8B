@@ -141,6 +141,10 @@ def _check_moved_not_duplicated(world):
 
 # The three meetings the fixture puts on Wednesday 2026-07-22.
 WEDNESDAY = "2026-07-22"
+# An answer from an earlier turn, and the summary that copies it back verbatim.
+# Longer than the guard's eight-word span on purpose.
+ECHOED_LINE = ("I listed the inbox and there are eleven emails waiting for you "
+               "this morning.")
 # Words a message would use if it had believed the memory over the calendar.
 _CLEAR = ("free", "clear", "no meetings", "nothing scheduled", "available",
           "open", "wide open", "not busy")
@@ -240,6 +244,13 @@ SCRIPTS = {
                body="Here is what is in your inbox."),
         _reply("done", summary="listed the inbox"),
     ],
+    # Ends by quoting the previous turn's answer back. Left alone it compounds,
+    # because the summary is stored and becomes the next turn's context.
+    "echo_summary": [
+        _reply("list_emails"),
+        _reply("done", summary=ECHOED_LINE),
+        _reply("done", summary="Listed the inbox for you just now."),
+    ],
     # Reads the email naming q3_raw.xlsx, never opens it, writes from memory.
     "export_copied": [
         _steps("list_emails", "read_email", "create_spreadsheet"),
@@ -293,6 +304,13 @@ TASKS = [
         "setup": _seed_stale_memory,
         "check": _check_memory_did_not_outrank_the_world,
         "why": "a saved memory is a hint from an earlier run, not the world now",
+    },
+    {
+        "id": "echo_summary",
+        "text": "List my emails again.",
+        "history": "Assistant did: " + ECHOED_LINE,
+        "check": _check_read_only,
+        "why": "a done summary must say what THIS run did, not repeat the last one",
     },
     {
         "id": "move_not_duplicate",
