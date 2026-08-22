@@ -9,6 +9,7 @@ fs_tools root, the agent profile), so tests that touch it put it back.
 import datetime
 import json
 import os
+import random
 import sys
 import re
 import subprocess
@@ -1403,6 +1404,80 @@ class TestDisposerIndependence(unittest.TestCase):
         tools.edit_registry({'shared': {'effect': 'read', 'desc': 'inner'}}, reg)
         outer()
         self.assertEqual(reg['shared']['desc'], 'original')
+
+
+class TestConfluence(unittest.TestCase):
+    """Paper 4.4.5: the dynamic history of a running system leaves no trace.
+
+    The paper's characterising property is that whatever sequence of
+    activations and deactivations the system has been through, the state it
+    quiesces at is the one the surviving components would have produced had
+    each been applied once and none ever unloaded. Expressed over our registry,
+    that is a statement about edit_registry and its disposers, and it is the
+    strongest single claim we can make about them.
+
+    Randomised, but over FIXED seeds. A test that generates a different history
+    on every run reports a different thing on every run, and a failure nobody
+    can reproduce is not a finding. The seed is in every failure message."""
+
+    KEYS = ('alpha', 'beta', 'gamma', 'delta', 'epsilon')
+
+    @staticmethod
+    def _spec(tag):
+        return {'effect': 'read', 'desc': tag}
+
+    def test_any_interleaving_of_disjoint_edits_leaves_only_the_survivors(self):
+        """The confluence claim, under the disjointness precondition that
+        edit_registry documents: order of application and withdrawal cannot be
+        observed in the final state, only which edits survive."""
+        for seed in range(40):
+            rng = random.Random(seed)
+            base = {'untouched': self._spec('base')}
+            reg = dict(base)
+            unused = list(self.KEYS)
+            rng.shuffle(unused)
+            live = []
+            for _ in range(12):
+                if unused and (not live or rng.random() < 0.6):
+                    key = unused.pop()          # each key used once: disjoint
+                    spec = self._spec('edit-%s' % key)
+                    live.append((key, spec, tools.edit_registry({key: spec}, reg)))
+                elif live:
+                    _, _, undo = live.pop(rng.randrange(len(live)))
+                    undo()
+            expected = dict(base)
+            for key, spec, _ in live:
+                expected[key] = spec
+            self.assertEqual(reg, expected, 'seed %d' % seed)
+
+    def test_full_lifo_teardown_leaves_no_trace_even_with_overlap(self):
+        """Overlapping keys break arbitrary interleaving, but they do not break
+        LIFO. A complete teardown in reverse order restores the base exactly,
+        which is what the shutdown paths actually do."""
+        for seed in range(40):
+            rng = random.Random(seed)
+            base = {k: self._spec('base-%s' % k) for k in self.KEYS[:3]}
+            reg = dict(base)
+            stack = []
+            for n in range(10):
+                key = rng.choice(self.KEYS)     # deliberate collisions
+                if rng.random() < 0.25:
+                    stack.append(tools.suppress([key], reg))
+                else:
+                    stack.append(tools.edit_registry({key: self._spec('e%d' % n)}, reg))
+            while stack:
+                stack.pop()()
+            self.assertEqual(reg, base, 'seed %d' % seed)
+
+    def test_a_disposer_is_idempotent(self):
+        """The docstring claims it; nothing asserted it."""
+        reg = {'x': self._spec('original')}
+        undo = tools.edit_registry({'x': self._spec('shadow'), 'y': None}, reg)
+        undo()
+        once = dict(reg)
+        undo()
+        self.assertEqual(reg, once)
+        self.assertEqual(reg['x']['desc'], 'original')
 
 
 class TestDocumentLinks(unittest.TestCase):
