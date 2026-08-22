@@ -53,6 +53,47 @@ the author expected that to happen.
 completing the task** — otherwise a [[Agent Loop#Finish|verifier]] looking for
 "sent" would reject a correct `done`.
 
+## Two accounts, one tool name
+
+`ms365` and `ms365-personal` ship the same `outlook_` prefix and an identical
+ten-entry allow list. Connecting a work mailbox and a personal one therefore
+collided on all ten names, and the old fallback qualified the loser with its
+server id: `outlook_list-mail-messages` beside
+`ms365-personal_list-mail-messages`. Twenty tools for ten operations, and the
+model had to learn two unrelated names for one thing.
+
+The bridge now treats that case as **several providers of one capability**
+rather than a name clash, which is what Cordis §6.2 calls a service broker as
+against exclusive binding. The second provider joins the first behind the
+existing name, and the tool grows a required `account` argument naming the
+connected mailboxes.
+
+Measured on the real bridge, with the selftest server enabled twice:
+
+| | tools | tool-doc block |
+|---|---|---|
+| one provider | 4 | +772 chars |
+| two, exclusive binding | 8 | +1648 chars (2.13x) |
+| two, brokered | 4 | +1136 chars (1.47x) |
+
+Half the tool count, which is the number an 8B is most sensitive to. The
+residual 1.47x is the `account` line itself, and it is why the account list is
+named **once** on the parameter and not repeated in the description: printing it
+twice ate most of what brokering saved.
+
+> [!warning] `account` is required, deliberately
+> With two mailboxes behind one name there is no safe default. A silent choice
+> is merely confusing for a read and outright wrong for an emission, so an
+> omitted or unknown `account` refuses and names the options instead of
+> picking one. Cordis calls this an explicit target named by the consumer.
+
+A broker only ever appears on collision, so single-provider setups keep exactly
+the tools and signatures they had. A clash with a *base* harness tool is still
+a clash, not a provider, and still qualifies with the server id: only tools this
+module injected can broker. Where two providers disagree on effect class, the
+most dangerous one wins, so the guards follow the worse case rather than
+whichever server was connected first.
+
 ## Related
 
 - [[Real Accounts]] — the registry, the `--mcp` flag, and which servers to use

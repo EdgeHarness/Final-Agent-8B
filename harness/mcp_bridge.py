@@ -61,6 +61,7 @@ _CLIENTS = []                     # live MCPClient processes, terminated on shut
 _CONFIRM = None                   # callable(action, detail) -> bool, or None
 _INJECTED = set()                 # harness tool names this module added
 _UNDO = []                        # disposers for every registry change, run LIFO
+_PROVIDERS = {}                   # harness tool name -> [(account, client, mcp_name, is_write)]
 
 # A world-changing verb anywhere in the tool name. Heuristic; overridable per server.
 _WRITE_RE = re.compile(
@@ -387,6 +388,59 @@ def _make_executor(client, mcp_name, is_write):
     return run
 
 
+def _make_broker_executor(harness_name):
+    """Dispatch one call to whichever connected account the caller named.
+
+    Cordis 6.2 calls this a service broker, as against exclusive binding: several
+    providers of one interface coexist behind a single name and the broker routes
+    each request, instead of each provider claiming a name of its own.
+
+    Reuses _make_executor so the confirmation path is byte for byte the one a
+    single-provider tool gets. A broker must not become a second place where the
+    rules about writes are written down."""
+    def run(world, mem, args):
+        by_id = {a: (c, n, w) for a, c, n, w in _PROVIDERS.get(harness_name, ())}
+        account = (args or {}).get("account")
+        if account not in by_id:
+            raise ToolError(
+                "'account' must be one of %s; got %r. More than one account is "
+                "connected, so there is no default." % (", ".join(sorted(by_id)), account))
+        client, mcp_name, is_write = by_id[account]
+        rest = {k: v for k, v in (args or {}).items() if k != "account"}
+        return _make_executor(client, mcp_name, is_write)(world, mem, rest)
+    return run
+
+
+def _to_broker(harness_name):
+    """Rewrite an injected tool so it serves every provider registered under its
+    name. Idempotent: a third provider rebuilds the same way a second did."""
+    providers = _PROVIDERS[harness_name]
+    accounts = sorted(a for a, _, _, _ in providers)
+    spec = dict(TOOLS[harness_name])
+
+    # The account list is named ONCE, on the parameter, which is where the model
+    # looks for allowed values. Repeating it in the description too cost real
+    # context for no information: measured, it ate most of what brokering saved.
+    params = dict(spec["params"])
+    params["account"] = ("string, one of: " + ", ".join(accounts), True)
+    spec["params"] = params
+
+    example = dict(spec.get("example") or {})
+    ex_args = dict(example.get("args") or {})
+    ex_args["account"] = accounts[0]
+    example["args"] = ex_args
+    spec["example"] = example
+
+    # The most dangerous provider sets the class. Two servers behind one name
+    # should agree, but if they ever disagree the guards must follow the worse
+    # one. EFFECTS is ordered least to most dangerous.
+    spec["effect"] = max((_effect_class(n, w) for _, _, n, w in providers),
+                         key=tools.EFFECTS.index)
+
+    spec["run"] = _make_broker_executor(harness_name)
+    _UNDO.append(tools.edit_registry({harness_name: spec}))
+
+
 def _register(client, tool, server_cfg, prefix, draft_only, seen_names):
     mcp_name = tool.get("name")
     if not mcp_name:
@@ -402,8 +456,21 @@ def _register(client, tool, server_cfg, prefix, draft_only, seen_names):
         return None
 
     harness_name = f"{prefix}{mcp_name}" if prefix else mcp_name
+    if harness_name in _INJECTED and harness_name not in seen_names:
+        # ANOTHER PROVIDER of the same capability, not a name clash. ms365 and
+        # ms365-personal share the outlook_ prefix and an identical allow list,
+        # so connecting a work and a personal mailbox used to yield twenty tools
+        # for ten operations, the second set named asymmetrically after its
+        # server. One broker with an account argument instead.
+        _PROVIDERS.setdefault(harness_name, []).append(
+            (client.id, client, mcp_name, is_write))
+        _to_broker(harness_name)
+        seen_names.add(harness_name)
+        if is_write:
+            WRITE_TOOLS.add(harness_name)
+        return harness_name
     if harness_name in TOOLS or harness_name in seen_names:
-        harness_name = f"{client.id}_{mcp_name}"   # collision: qualify with server id
+        harness_name = f"{client.id}_{mcp_name}"   # a real clash: qualify with server id
     schema = tool.get("inputSchema") or {}
     desc = str(tool.get("description", "")).strip().replace("\n", " ")
     tag = "[real, needs confirmation] " if is_write else "[real, read-only] "
@@ -418,6 +485,8 @@ def _register(client, tool, server_cfg, prefix, draft_only, seen_names):
     }))
     seen_names.add(harness_name)
     _INJECTED.add(harness_name)
+    _PROVIDERS.setdefault(harness_name, []).append(
+        (client.id, client, mcp_name, is_write))
     if is_write:
         WRITE_TOOLS.add(harness_name)
     return harness_name
@@ -525,6 +594,7 @@ def shutdown():
     while _UNDO:
         _UNDO.pop()()
     _INJECTED.clear()
+    _PROVIDERS.clear()
     for c in _CLIENTS:
         c.close()
     _CLIENTS.clear()

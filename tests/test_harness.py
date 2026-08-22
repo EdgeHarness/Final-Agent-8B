@@ -1525,6 +1525,128 @@ class TestTeardownOrder(unittest.TestCase):
             mb._INJECTED.update(saved_injected)
 
 
+class TestServiceBroker(unittest.TestCase):
+    """Cordis 6.2: several providers of one interface behind a single name.
+
+    ms365 and ms365-personal ship the same outlook_ prefix and an identical
+    ten-entry allow list, so connecting a work and a personal mailbox used to
+    register twenty tools for ten operations, the second set named after its
+    server (outlook_list_mail beside ms365-personal_list_mail). Measured on the
+    real bridge with the selftest server enabled twice, the tool-doc block cost
+    2.13x one provider. As a broker it costs 1.47x and half the tool count."""
+
+    class FakeClient:
+        def __init__(self, cid, reply):
+            self.id = cid
+            self.name = cid
+            self._reply = reply
+            self.calls = []
+
+        def call_tool(self, name, args):
+            self.calls.append((name, args))
+            return False, self._reply
+
+        def close(self):
+            pass
+
+    def setUp(self):
+        from harness import mcp_bridge as mb
+        self.mb = mb
+        self._saved = (list(mb._CLIENTS), list(mb._UNDO), set(mb._INJECTED),
+                       dict(mb._PROVIDERS), set(mb.WRITE_TOOLS))
+        mb._CLIENTS.clear(); mb._UNDO.clear()
+        mb._INJECTED.clear(); mb._PROVIDERS.clear()
+        self._base_tools = dict(TOOLS)
+
+    def tearDown(self):
+        mb = self.mb
+        while mb._UNDO:
+            mb._UNDO.pop()()
+        TOOLS.clear(); TOOLS.update(self._base_tools)
+        clients, undo, injected, providers, writes = self._saved
+        mb._CLIENTS[:] = clients
+        mb._UNDO[:] = undo
+        mb._INJECTED.clear(); mb._INJECTED.update(injected)
+        mb._PROVIDERS.clear(); mb._PROVIDERS.update(providers)
+        mb.WRITE_TOOLS.clear(); mb.WRITE_TOOLS.update(writes)
+
+    def _two_mailboxes(self, mcp_name='list_mail'):
+        work = self.FakeClient('work', 'WORK INBOX')
+        personal = self.FakeClient('personal', 'PERSONAL INBOX')
+        spec = {'name': mcp_name, 'description': 'List messages.', 'inputSchema': {}}
+        # seen_names is per-server in enable(), so a fresh set for each.
+        n1 = self.mb._register(work, spec, {}, 'outlook_', True, set())
+        n2 = self.mb._register(personal, spec, {}, 'outlook_', True, set())
+        return work, personal, n1, n2
+
+    def test_a_second_provider_shares_the_name_instead_of_claiming_its_own(self):
+        work, personal, n1, n2 = self._two_mailboxes()
+        self.assertEqual(n1, 'outlook_list_mail')
+        self.assertEqual(n2, 'outlook_list_mail')
+        self.assertNotIn('personal_list_mail', TOOLS)
+
+    def test_the_account_argument_is_required_and_names_both(self):
+        self._two_mailboxes()
+        kind, required = TOOLS['outlook_list_mail']['params']['account']
+        self.assertTrue(required, 'two mailboxes have no safe default')
+        self.assertIn('work', kind)
+        self.assertIn('personal', kind)
+
+    def test_the_call_reaches_the_account_that_was_named(self):
+        work, personal, _, _ = self._two_mailboxes()
+        run = TOOLS['outlook_list_mail']['run']
+        self.assertEqual(run(None, None, {'account': 'personal'}), 'PERSONAL INBOX')
+        self.assertEqual(personal.calls, [('list_mail', {})])
+        self.assertEqual(work.calls, [], 'the other mailbox was touched')
+        self.assertEqual(run(None, None, {'account': 'work'}), 'WORK INBOX')
+        self.assertEqual(work.calls, [('list_mail', {})])
+
+    def test_an_omitted_account_refuses_rather_than_picking_one(self):
+        """The whole safety argument for the broker. Silently choosing a mailbox
+        is merely confusing for a read and wrong for an emission."""
+        work, personal, _, _ = self._two_mailboxes()
+        run = TOOLS['outlook_list_mail']['run']
+        for args in ({}, {'account': 'nonesuch'}):
+            with self.assertRaises(ToolError) as caught:
+                run(None, None, args)
+            self.assertIn('work', str(caught.exception))
+            self.assertIn('personal', str(caught.exception))
+        self.assertEqual(work.calls, [])
+        self.assertEqual(personal.calls, [])
+
+    def test_a_clash_with_a_base_tool_still_qualifies_rather_than_brokering(self):
+        """send_email is a different capability that happens to share a name, not
+        another provider of one. Only tools this module injected can broker."""
+        client = self.FakeClient('somewhere', 'ok')
+        spec = {'name': 'send_email', 'description': 'Send.', 'inputSchema': {}}
+        name = self.mb._register(client, spec, {'write_tools': ['send_email']},
+                                 '', False, set())
+        self.assertEqual(name, 'somewhere_send_email')
+        self.assertNotIn('account', TOOLS['send_email']['params'])
+
+    def test_the_most_dangerous_provider_sets_the_effect_class(self):
+        """If two servers behind one name ever disagree, the guards follow the
+        worse one rather than the first one registered."""
+        reader = self.FakeClient('reader', 'ok')
+        writer = self.FakeClient('writer', 'ok')
+        self.mb._register(reader, {'name': 'thing', 'description': 'r',
+                                   'inputSchema': {}},
+                          {'read_tools': ['thing']}, 'x_', False, set())
+        self.assertEqual(tools.effect_of('x_thing'), 'read')
+        self.mb._register(writer, {'name': 'thing', 'description': 'w',
+                                   'inputSchema': {}},
+                          {'write_tools': ['thing']}, 'x_', False, set())
+        self.assertEqual(tools.effect_of('x_thing'), 'unrecoverable_emission')
+        self.assertIn('x_thing', tools.write_tool_names())
+
+    def test_brokering_is_undone_like_any_other_registration(self):
+        self._two_mailboxes()
+        self.assertIn('outlook_list_mail', TOOLS)
+        while self.mb._UNDO:
+            self.mb._UNDO.pop()()
+        self.assertNotIn('outlook_list_mail', TOOLS)
+
+
 class TestDocumentLinks(unittest.TestCase):
     """Nothing checked that a document link resolved, so a rename could break
     every reference to what it renamed and nothing would say so.
