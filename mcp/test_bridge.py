@@ -4,7 +4,7 @@ Runs the real mcp_bridge against mcp/selftest_server.py, so it exercises the
 actual subprocess, the actual JSON-RPC handshake and the actual classifier —
 not a mock of them.
 
-    python3 -m mcp.test_bridge        (from the standalone/ directory)
+    python3 -m mcp.test_bridge        (from the repo root)
 
 Each check is a claim made in mcp/README.md. If one fails, the README is lying.
 """

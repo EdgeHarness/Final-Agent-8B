@@ -3,7 +3,16 @@
 # Wraps the agent, the Agent Lab UI and the MCP safety self-test so the long
 # PowerShell invocations become one word.  Run `make` for the target list.
 #
-# make is NOT installed by default on this machine:
+# WINDOWS ONLY, on purpose.  SHELL is powershell.exe and `doctor` reads the
+# Snapdragon X Elite's cores, RAM and power plan through CIM - the box this
+# agent is built to run on.  On macOS or Linux skip make and call the modules
+# directly, which is all these targets do:
+#
+#     python -m webui.server        # = make web
+#     python -m mcp.test_bridge     # = make mcp-test
+#     python -m tests.test_harness  # the suite
+#
+# make is NOT installed by default on the lab machine:
 #     winget install --id ezwinports.make
 #
 # Every path below is overridable on the command line:
@@ -86,18 +95,18 @@ npu-up: ## Serve the model on the Hexagon NPU via GenieX (:18181)
 	@try { $$null = Invoke-WebRequest http://127.0.0.1:18181/v1/models -TimeoutSec 2 -UseBasicParsing; Write-Host "geniex already up on :18181" } catch { Start-Process geniex -ArgumentList 'serve','--compute','$(COMPUTE)','--nctx','$(NCTX)' -WindowStyle Hidden; Write-Host "geniex serve started on :18181 (--compute $(COMPUTE) --nctx $(NCTX))" }
 
 shim: ## Ollama-API shim in front of GenieX (:11434) - stop Ollama first
-	@Set-Location standalone; & "$(PY)" -m npu.ollama_shim
+	@& "$(PY)" -m npu.ollama_shim
 
 lab: ## Agent Lab in a desktop window (falls back to the browser)
-	@Set-Location standalone; & "$(PY)" -m webui.app
+	@& "$(PY)" -m webui.app
 
 web: ## Agent Lab in a browser tab instead of a window
-	@Set-Location standalone; & "$(PY)" -m webui.server
+	@& "$(PY)" -m webui.server
 
 run: ## Run the agent headless. Override with TASK="..."
-	@& "./run.ps1" "$(TASK)"
+	@& "./agents/8b/run.ps1" "$(TASK)"
 
 mcp-test: ## Assert the MCP safety guarantees (no credentials needed)
-	@Set-Location standalone; & "$(PY)" -m mcp.test_bridge
+	@& "$(PY)" -m mcp.test_bridge
 
 .PHONY: help doctor pydeps model ollama-up npu-pull npu-up shim lab web run mcp-test

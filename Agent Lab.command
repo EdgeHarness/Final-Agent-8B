@@ -1,7 +1,7 @@
 #!/bin/bash
 # Double-click (macOS) or run from a terminal to open the Agent Lab in a browser.
 # Everything stays on this machine: the server binds loopback only.
-cd "$(dirname "$0")/standalone" || exit 1
+cd "$(dirname "$0")" || exit 1
 
 PY=${PYTHON:-python3}
 command -v "$PY" >/dev/null 2>&1 || PY=python

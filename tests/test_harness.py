@@ -1,10 +1,10 @@
 """Tests for the harness backend.
 
 Stdlib unittest, no pytest, no fixtures: `python -m tests.test_harness` from
-standalone/. The harness has process-global state (the TOOLS registry, the
+the repo root. The harness has process-global state (the TOOLS registry, the
 fs_tools root, the agent profile), so tests that touch it put it back.
 
-    cd standalone && ../.venv/bin/python -m tests.test_harness
+    .venv/bin/python -m tests.test_harness
 """
 import datetime
 import json

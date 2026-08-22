@@ -2,7 +2,7 @@
 
 Run this by hand when the shipped model list changes. The app never calls it:
 the catalog is baked in so a run needs no network, which is the point of the
-product. Usage:  python3 standalone/tools/refresh_catalog.py
+product. Usage:  python3 tools/refresh_catalog.py
 """
 import json
 import os

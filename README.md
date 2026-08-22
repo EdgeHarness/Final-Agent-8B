@@ -33,7 +33,7 @@ make lab           # Agent Lab in a window
 Or headless, and without make:
 
 ```powershell
-cd standalone\agents\8b
+cd agents\8b
 .\run.ps1 "Find a free hour on Thursday and book it as Deep work"
 ```
 
@@ -61,16 +61,15 @@ tools. `make pydeps` installs them. The launchers (`Agent Lab.ps1`,
 
 | path | what |
 |---|---|
-| `standalone/harness/` | the loop, the tool registry, the safety layers — the only place loop behaviour is defined |
-| `standalone/agents/8b/` | the agent: its config, runner, workspace, memory and run logs |
-| `standalone/webui/` | Agent Lab, a loopback console that shows the loop working |
-| `standalone/mcp/` | the real-account server registry, and a self-test that needs no credentials |
-| `standalone/npu/` | the Ollama-API shim in front of GenieX |
-| `standalone/tests/` | the harness test suite |
-| `notes/` | how it actually works, in detail — start at [Home.md](Home.md) |
+| `harness/` | the loop, the tool registry, the safety layers — the only place loop behaviour is defined |
+| `agents/8b/` | the agent: its config, runner, workspace, memory and run logs |
+| `webui/` | Agent Lab, a loopback console that shows the loop working |
+| `mcp/` | the real-account server registry, and a self-test that needs no credentials |
+| `npu/` | the Ollama-API shim in front of GenieX |
+| `tests/` | the harness test suite |
+| `notes/` | the working vault: design reasoning, written for Obsidian |
 
 ```powershell
-cd standalone
 python -m tests.test_harness    # the harness suite; stdlib unittest, no pytest
 python -m mcp.test_bridge       # the MCP safety guarantees, no credentials needed
 ```
@@ -92,14 +91,18 @@ flowchart TD
     PARSE -- yes --> ISDONE{"done()?"}
 
     ISDONE -- no --> REPAIR["repair and normalize args:<br/>near-miss names renamed,<br/>unknown dropped,<br/>tomorrow -> YYYY-MM-DD"]
-    REPAIR --> CHECKS["cross-checks:<br/>params valid<br/>date agrees with the task<br/>write named by the plan<br/>planned read before writing<br/>no identical call vs<br/>an unchanged world"]
+    REPAIR --> CHECKS["cross-checks, in order:<br/>params valid<br/>date agrees with the task (writes only)<br/>write named by the plan<br/>a named file was opened first<br/>planned read before writing<br/>no identical call vs an unchanged world"]
+    CHECKS -- "unplanned write,<br/>after a read" --> REPLAN["revise the plan once:<br/>a plan written before<br/>reading cannot name<br/>what the data requires"]
+    REPLAN --> CALL
     CHECKS -- questioned --> FB
     CHECKS -- ok --> EXEC["execute the tool<br/>OBSERVATION into context"]
     EXEC --> CALL
 
-    ISDONE -- yes --> VERIFY{"verifier: requirements vs<br/>actions and their results"}
+    ISDONE -- yes --> ECHO{"summary repeats an<br/>earlier answer?"}
+    ECHO -- yes, once --> FB
+    ECHO -- no --> VERIFY{"verifier: requirements vs<br/>actions and their results"}
     VERIFY -- "incomplete:<br/>gap quoted" --> FB
-    VERIFY -- "complete, or<br/>errored: fail open" --> FIN(["episode ends<br/>world snapshotted<br/>(even on crash or Stop)"])
+    VERIFY -- "complete, or<br/>errored: fail open" --> FIN(["episode ends<br/>world snapshotted<br/>(even on crash or Stop)<br/>unrequested side effects reported"])
 ```
 
 Every box above is paid out of the same call budget as the work itself, and
@@ -118,16 +121,34 @@ dates and times normalized against the clock. Arguments are validated *before*
 execution, and the failure message quotes the tool's own worked example rather
 than describing a schema — showing a small model the right shape beats telling
 it. Then the cross-checks: a date the model wrote itself is compared against the
-date the task names, so "Wednesday" cannot become a Monday unnoticed, and a
-write its own plan never proposed is questioned once.
+date the task names, so "Wednesday" cannot become a Monday unnoticed (on writes
+only — a read with a mismatched date is the model looking around). A write the
+plan never proposed is questioned once. And a document write is questioned once
+when something the agent *read* names a file that exists here and it never
+opened it: writing from memory while the task's own data sits on disk is the
+failure this harness exists to catch.
+
+**Replan.** The plan is written before the agent has read anything, so on a task
+whose requirements live in the data ("read this email and do what it asks") it
+cannot name the work. Once a read has landed, an unplanned write spends one call
+revising the plan instead of being held to it. Only once: a model that could
+replan on every surprise could rewrite its way to anything.
 
 **Finish.** When the model calls `done`, a verifier re-reads the task against
 the actions actually taken *and their results* — so it can see that the file it
 is about to demand already exists — and answers
-`{"complete": bool, "missing": str}`. If incomplete, `done` is rejected and the
-gap is quoted back. On a verifier error it fails open rather than trapping the
-agent. At 8B this is the single highest-value piece of scaffolding: the model
-will happily call `done` with the last clause of a three-part task unaddressed.
+`{"complete": bool, "missing": str, "unrequested": str}`. If incomplete, `done`
+is rejected and the gap is quoted back. On a verifier error it fails open rather
+than trapping the agent. At 8B this is the single highest-value piece of
+scaffolding: the model will happily call `done` with the last clause of a
+three-part task unaddressed.
+
+`unrequested` names any write the task never asked for. Nothing is undone — a
+sent message cannot be unsent, and auto-reverting would be a larger side effect
+than the one reported — so it is surfaced for the person who asked to judge.
+Before the verifier runs, a `done` summary that copies an eight-word span out of
+an earlier turn in the same conversation is questioned once: left alone it
+compounds, because the summary is stored and becomes the next turn's context.
 
 **Repetition.** A repeated exchange sitting in the context is itself the
 attractor pulling the model back into a loop, so the harness deletes the older
@@ -150,6 +171,20 @@ curve is not monotonic — a 1B and a 32B both get *less* scaffolding than an 8B
 for opposite reasons. At 1B the mistakes are mechanical, so planning and
 verification only starve the budget. At 32B a call costs minutes, so flailing is
 the expensive failure, not stopping early.
+
+| model | calls | ctx | plan | verify |
+|---|---|---|---|---|
+| `llama3.2:1b` | 18 | 8k | no | 0 |
+| `llama3.2:3b` | 14 | 8k | yes | 1 |
+| `llama3.1:8b` | 50 | 8k | yes | 2 |
+| `qwen2.5:14b` | 14 | 12k | yes | 2 |
+| `qwen2.5:32b` | 12 | 16k | yes | 1 |
+
+The call number is a ceiling, not a target: an agent that finishes in four calls
+costs four. A tight number on a small model is a loop-brake; on a model that can
+follow a plan it is only a premature cut-off, which is why the 8B carries real
+headroom. The GenieX NPU bundles resolve to the same profile as their Ollama
+equivalents, by parameter count parsed from the tag rather than by family.
 
 The benchmark never sets a profile; it runs the default, so graded runs stay
 comparable with runs already on disk.
@@ -196,9 +231,13 @@ Detail: [notes/Determinism.md](notes/Determinism.md)
 
 ## Reading further
 
-`notes/` is an Obsidian vault and the authoritative description of the system;
-where it and this README disagree, the notes follow the source. Open
-[Home.md](Home.md) for the index, or
-[standalone/agents/8b/README.md](standalone/agents/8b/README.md) for the
-agent-level detail: the full tool list, what persists between runs, model tiers
-and every flag.
+**This README is the front door, and the source is the authority.** Where a
+document and the code disagree, the code is right.
+
+[agents/8b/README.md](agents/8b/README.md) has the agent-level detail: the full
+16-tool registry, what persists between runs, model tiers, every flag.
+
+`notes/` is a working Obsidian vault, kept because it holds the reasoning behind
+decisions the code cannot state. It is written for Obsidian, so most notes use
+`[[wikilinks]]` that do not resolve on GitHub; read it in Obsidian, or follow
+the direct links from the sections above.

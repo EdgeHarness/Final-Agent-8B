@@ -10,19 +10,19 @@ Thumbs.db
 .vscode/
 .idea/
 
-# --- Claude Code: machine-local permissions, not shared ---
-.claude/settings.local.json
+# --- Claude Code: machine-local, not shared ---
+.claude/
 
-# --- Obsidian: per-machine UI state, not vault content ---
-.obsidian/workspace.json
-notes/.obsidian/workspace.json
+# --- Obsidian: editor config, never source ---
+.obsidian/
 
 # --- Agent run artifacts (state, not source) ---
-standalone/agents/*/workspace/
-standalone/agents/*/logs/
-runs/*
-!runs/.gitkeep
+agents/*/workspace/
+agents/*/logs/
 *.log
+
+# --- Working documents: audits, plans, session notes. Local, not source. ---
+docs/
 
 # --- Generated office files ---
 *.pptx
@@ -31,9 +31,9 @@ runs/*
 *.ics
 
 # --- llama.cpp: the checkout build-xelite.ps1 clones (~25 GB) and its output ---
-standalone/llamacpp/llama.cpp/
-standalone/llamacpp/build-*/
+llamacpp/llama.cpp/
+llamacpp/build-*/
 *.gguf
 
 # --- Conversation threads (local, not source) ---
-standalone/agents/*/chat/
+agents/*/chat/

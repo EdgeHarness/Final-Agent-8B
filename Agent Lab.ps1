@@ -3,7 +3,7 @@
 # Everything stays on this machine: the server binds loopback only.
 
 $ErrorActionPreference = 'Stop'
-Set-Location (Join-Path $PSScriptRoot 'standalone')
+Set-Location $PSScriptRoot
 
 $py = $env:PYTHON
 if (-not $py) { $py = 'python' }
