@@ -459,18 +459,48 @@ def planned_tools(plan_text):
             if m.group(1) in TOOLS]
 
 
+def plan_name(name):
+    """A planned tool name, repaired onto a real one if it is a near miss.
+
+    Every other layer of this harness repairs before it rejects: near-miss
+    parameter names are renamed, unknown ones dropped, dates normalized, and a
+    misspelled tool CALL gets "did you mean" with the right shape. The plan step
+    was the one place that did not, so a model writing create_sheet for
+    create_spreadsheet lost that step silently - and losing a step is not
+    cosmetic here, because a write the plan no longer names arms the
+    unplanned-write guard and a read it no longer names disarms the
+    read-before-write one. Same cutoff as the parameter repair.
+    """
+    if not isinstance(name, str) or not name:
+        return None
+    if name in TOOLS:
+        return name
+    close = difflib.get_close_matches(name, list(TOOLS), n=1, cutoff=0.5)
+    return close[0] if close else None
+
+
 def plan_step(llm, messages, ep):
-    """Ask for a tool-grounded plan; return it as short text (or ''). Invalid
-    tool names are dropped - free prose never enters the context."""
+    """Ask for a tool-grounded plan; return it as short text (or ''). A tool
+    name that is not a near miss for any real tool is dropped - free prose
+    never enters the context."""
     reply = llm.chat(messages, force_json=True, num_predict=250, role="router")
     obj, _ = parse_lenient(reply)
-    steps = []
+    steps, repaired = [], []
     if isinstance(obj, dict) and isinstance(obj.get("steps"), list):
         for s in obj["steps"][:PROFILE.plan_max_steps]:
-            if isinstance(s, dict) and s.get("tool") in TOOLS:
-                what = str(s.get("what", ""))[:60]
-                steps.append(f"{len(steps) + 1}. {s['tool']} - {what}")
+            if not isinstance(s, dict):
+                continue
+            asked = s.get("tool")
+            tool = plan_name(asked)
+            if not tool:
+                continue
+            if tool != asked:
+                repaired.append(f"{asked} -> {tool}")
+            what = str(s.get("what", ""))[:60]
+            steps.append(f"{len(steps) + 1}. {tool} - {what}")
     plan = "\n".join(steps)
+    if repaired:
+        ep.note("repair", "plan step: " + "; ".join(repaired))
     ep.note("plan", plan or f"(unusable plan reply: {reply[:200]})")
     return plan
 

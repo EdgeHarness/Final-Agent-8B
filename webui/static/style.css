@@ -971,6 +971,15 @@ button.ghost:hover, a.ghost:hover { color: var(--ink); }
 .note b { color: var(--warn); font-weight: 500; }
 .note b.good-tag { color: var(--good); }
 .note b.warn-tag { color: var(--warn); }
+/* The name of the cross-check that questioned a call. It sits between the
+   "harness → model" label and the message, so it has to read as a name rather
+   than as the start of the sentence: same weight as the surrounding note, one
+   step brighter than the body text, never the warn colour the label already
+   uses. */
+.note .guard-tag {
+  color: var(--ink-dim); font-family: var(--mono); font-size: var(--t-meta);
+  letter-spacing: .01em;
+}
 
 details.trace, .ev > details { margin-top: 5px; }
 details.trace > summary, .ev > details > summary {

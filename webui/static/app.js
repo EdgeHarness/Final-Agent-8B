@@ -1031,6 +1031,10 @@ function onModelReply(content) {
 }
 
 let doneSummary = null;
+/* Which cross-check questioned the model, held from the guard note until the
+   feedback note it belongs to arrives. The harness emits them adjacently and
+   in that order, so one slot is enough. */
+let pendingGuard = null;
 
 function onNote(e) {
   const k = e.kind;
@@ -1039,6 +1043,10 @@ function onNote(e) {
     return;
   }
   if (k === 'task' || k === 'observation') return;   // shown by the banner / tool row
+  /* Not drawn on its own. The harness emits the name of the cross-check that
+     fired immediately before the message it produced, and two rows for one
+     event reads as two events. It labels the feedback below instead. */
+  if (k === 'guard') { pendingGuard = e.content; return; }
   /* The plan call has to settle its row too. It did not, so the row that
      produced the plan kept whatever the model had streamed into it: a raw
      {"steps": [...]} object sitting at the top of every run forever. The plan
@@ -1063,7 +1071,18 @@ function onNote(e) {
      same tool working, which reads as luck rather than as a system. */
   if (k === 'feedback') {
     const d = el('div', 'note');
-    d.append(el('b', null, 'harness → model'), document.createTextNode(' · ' + e.content));
+    d.append(el('b', null, 'harness → model'));
+    /* Which check spoke, when one did. A run showed the harness correcting the
+       model and gave no way to tell an invalid-call rejection from a guard
+       questioning a write, which is the difference between the harness fixing
+       a typo and the harness catching a mistake. Guard names are snake_case in
+       the source; they read as words here. */
+    if (pendingGuard) {
+      d.append(document.createTextNode(' · '),
+               el('span', 'guard-tag', pendingGuard.replace(/_/g, ' ')));
+      pendingGuard = null;
+    }
+    d.append(document.createTextNode(' · ' + e.content));
     push('act').append(d);
     return;
   }
@@ -1271,6 +1290,7 @@ function resetRun() {
   S.call = null;
   S.banner = null;
   doneSummary = null;
+  pendingGuard = null;
   $('tok-val').textContent = '0';
   startClock();
 

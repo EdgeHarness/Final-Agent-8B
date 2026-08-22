@@ -679,6 +679,51 @@ class TestFsToolEffects(unittest.TestCase):
         self.assertFalse(fs_tools._FS_TOOLS["read_file"].get("lists_files"))
 
 
+
+# --------------------------------------------------------- plan repair ---
+
+class TestPlanNameRepair(unittest.TestCase):
+    """Every other layer repairs before it rejects: near-miss parameter names
+    are renamed, unknown ones dropped, dates normalized, and a misspelled tool
+    CALL gets "did you mean" with the right shape. The plan step did not, so a
+    model writing create_sheet lost that step silently."""
+
+    def test_a_real_name_passes_through_unchanged(self):
+        for n in ("think", "create_spreadsheet", "list_emails"):
+            self.assertEqual(agent.plan_name(n), n)
+
+    def test_a_near_miss_is_repaired_onto_the_real_tool(self):
+        self.assertEqual(agent.plan_name("create_sheet"), "create_spreadsheet")
+        self.assertEqual(agent.plan_name("list_email"), "list_emails")
+        self.assertEqual(agent.plan_name("send_mail"), "send_email")
+
+    def test_something_that_is_not_a_tool_is_still_dropped(self):
+        """Repair, not invention. Free prose must never enter the context as a
+        plan step."""
+        for n in ("xyzzy", "", None, 123, "do the thing"):
+            self.assertIsNone(agent.plan_name(n))
+
+    def test_losing_a_step_is_not_cosmetic(self):
+        """Why this matters: the plan arms two guards. A write the plan no
+        longer names arms the unplanned-write guard, and a read it no longer
+        names disarms the read-before-write one."""
+        state = agent.GuardState(None, World(self.tmp.name), agent.Episode(), [],
+                                 "build it", agent.world_changing_tools(),
+                                 "1. list_emails - look\n2. create_spreadsheet - build")
+        self.assertEqual(state.first_read_planned, "list_emails")
+        self.assertIn("create_spreadsheet", state.planned_set)
+        dropped = agent.GuardState(None, World(self.tmp.name), agent.Episode(), [],
+                                   "build it", agent.world_changing_tools(),
+                                   "1. create_spreadsheet - build")
+        self.assertIsNone(dropped.first_read_planned)
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+
 # ------------------------------------------------------------------- memory ---
 
 class TestMemory(unittest.TestCase):
@@ -1231,6 +1276,60 @@ class TestLoop(unittest.TestCase):
             _ScriptedLLM([self.call("send_message", to="sam", text="hi")]),
             self.world, self.mem, "message sam")
         self.assertEqual(len(self.world.messages), 1)
+
+    def test_a_misspelled_plan_step_still_arms_the_guards(self):
+        """End to end, not just the helper: a plan that says create_sheet must
+        still produce a plan naming create_spreadsheet, so the write is planned
+        and the unplanned-write guard stays quiet."""
+        agent.set_profile(profiles.replace(profiles.DEFAULT, plan=True, verify_rounds=0))
+        plan = '{"steps": [{"tool": "list_email", "what": "look"}, ' \
+               '{"tool": "create_sheet", "what": "build it"}]}'
+        llm = _ScriptedLLM([plan, self.call("list_emails"),
+                            self.call("create_spreadsheet", filename="r.xlsx",
+                                      rows=[["Item", "Cost"], ["X", 1]])])
+        ep = agent.run_harness(llm, self.world, self.mem, "spreadsheet of my July receipts")
+        text = "\n".join(n["content"] for n in ep.transcript if n["kind"] == "plan")
+        self.assertIn("list_emails", text)
+        self.assertIn("create_spreadsheet", text)
+        self.assertEqual([n["content"] for n in ep.transcript if n["kind"] == "guard"], [],
+                         "both steps were planned, so nothing should be questioned")
+        repairs = [n["content"] for n in ep.transcript if n["kind"] == "repair"]
+        self.assertTrue(any("plan step" in r for r in repairs), repairs)
+
+    def test_a_plan_step_that_is_not_a_tool_at_all_is_still_dropped(self):
+        agent.set_profile(profiles.replace(profiles.DEFAULT, plan=True, verify_rounds=0))
+        plan = '{"steps": [{"tool": "xyzzy", "what": "nonsense"}]}'
+        llm = _ScriptedLLM([plan, self.call("list_emails")])
+        ep = agent.run_harness(llm, self.world, self.mem, "look at the inbox")
+        text = "\n".join(n["content"] for n in ep.transcript if n["kind"] == "plan")
+        self.assertIn("unusable plan reply", text)
+
+    def test_a_guard_note_lands_immediately_before_the_message_it_produced(self):
+        """The contract the web UI depends on: it holds the guard name from the
+        guard note and labels the very next feedback note with it, so a nudge
+        on screen says WHICH check spoke. One slot is enough only because the
+        two are adjacent and in that order."""
+        agent.set_profile(profiles.replace(profiles.DEFAULT, plan=True, verify_rounds=0))
+        plan = '{"steps": [{"tool": "list_emails", "what": "find the receipts"}, ' \
+               '{"tool": "create_spreadsheet", "what": "build it"}]}'
+        llm = _ScriptedLLM([plan, self.call("create_spreadsheet", filename="r.xlsx",
+                                            rows=[["Item", "Cost"], ["X", 1]])])
+        ep = agent.run_harness(llm, self.world, self.mem, "spreadsheet of my July receipts")
+        kinds = [(n["kind"], n["content"]) for n in ep.transcript]
+        guards = [i for i, (k, _) in enumerate(kinds) if k == "guard"]
+        self.assertTrue(guards, "no guard fired, so this asserts nothing")
+        for i in guards:
+            self.assertEqual(kinds[i][1], "read_before_write")
+            self.assertEqual(kinds[i + 1][0], "feedback",
+                             "a guard note must be followed by its own message")
+
+    def test_only_a_questioned_call_emits_a_guard_note(self):
+        """The other half: an ordinary run must not leave a stale guard name
+        lying around for an unrelated feedback message to pick up."""
+        agent.set_profile(profiles.replace(profiles.DEFAULT, plan=False, verify_rounds=0))
+        ep = agent.run_harness(_ScriptedLLM([self.call("list_emails")]),
+                               self.world, self.mem, "look at the inbox")
+        self.assertEqual([n for n in ep.transcript if n["kind"] == "guard"], [])
 
     def test_writing_before_reading_is_questioned_once(self):
         """The worst failure this app can produce: asked for a spreadsheet of
