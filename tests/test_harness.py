@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from harness import agent, fs_tools, office, profiles, tools  # noqa: E402
 from harness.memory import MemoryStore  # noqa: E402
 from harness.tools import TOOLS, execute, validate_call  # noqa: E402
+from harness import world as world_mod  # noqa: E402
 from harness.world import ToolError, World  # noqa: E402
 from bench import run as bench_run  # noqa: E402
 from bench import tasks as bench_tasks  # noqa: E402
@@ -1050,6 +1051,74 @@ class TestBenchGraders(unittest.TestCase):
             bench_run.arms_for(["harness-no-nonsense"])
 
 
+
+# ---------------------------------------------------------- world contract ---
+
+class _MinimalWorld:
+    """A world that implements the contract and NOTHING else.
+
+    Deliberately not a World subclass and deliberately missing every office
+    member. If the loop reaches for an inbox, a calendar or a files_dir, this
+    raises AttributeError and the test fails, which is the point: the contract
+    is verified by running against it, not by grepping agent.py for what it
+    mentions."""
+
+    def __init__(self):
+        self.actions = []
+        self.snapshots = 0
+
+    def file_names(self):
+        return set()
+
+    def snapshot(self):
+        self.snapshots += 1
+
+    def log(self, tool, args, ok, result_preview):
+        self.actions.append({"tool": tool, "args": args, "ok": ok,
+                             "result": result_preview})
+
+
+class TestWorldContract(unittest.TestCase):
+    """The audit's complaint was that world.py is a concrete class and nothing
+    enforces the shape. The contract is four members, and it was measured
+    rather than designed: they are the only ones the loop and the execution
+    layer actually touch."""
+
+    def test_the_real_world_satisfies_it(self):
+        w = World(tempfile.mkdtemp())
+        self.assertEqual(world_mod.missing_world_members(w), ())
+
+    def test_the_checker_names_what_is_missing(self):
+        self.assertEqual(world_mod.missing_world_members(object()),
+                         ("actions", "file_names", "snapshot", "log"))
+
+    def test_a_world_with_only_the_contract_can_drive_the_loop(self):
+        """The claim, verified by running rather than by reading. A world with
+        no inbox, no calendar and no files_dir completes a real episode."""
+        w = _MinimalWorld()
+        mem = MemoryStore(os.path.join(tempfile.mkdtemp(), "m.jsonl"))
+        cfg = agent.RunConfig(max_calls=6,
+                              profile=profiles.replace(profiles.DEFAULT, plan=False,
+                                                       verify_rounds=0))
+        llm = _ScriptedLLM([
+            json.dumps({"thought": "t", "tool": "think", "args": {"thought": "hm"}}),
+            json.dumps({"thought": "t", "tool": "done", "args": {"summary": "thought"}}),
+        ])
+        ep = agent.run_harness(llm, w, mem, "just think about it", cfg=cfg)
+        self.assertTrue(ep.finished)
+        self.assertEqual(w.snapshots, 1, "the loop must still snapshot")
+        self.assertEqual([a["tool"] for a in w.actions], ["think"])
+
+    def test_the_office_members_are_the_domains_not_the_loops(self):
+        """The other half of the seam: everything beyond the four belongs to
+        the simulated office and is reached only by that domain's tools."""
+        w = World(tempfile.mkdtemp())
+        for office_member in ("emails", "events", "messages", "reminders",
+                              "list_emails", "add_event", "files_dir"):
+            self.assertTrue(hasattr(w, office_member))
+            self.assertNotIn(office_member, world_mod.WORLD_CONTRACT)
+
+
 # ------------------------------------------------------------------- memory ---
 
 class TestMemory(unittest.TestCase):
@@ -1672,6 +1741,48 @@ class TestLoop(unittest.TestCase):
         llm = _ScriptedLLM([self.call("think", thought="x")])
         agent.run_harness(llm, self.world, self.mem, "think about it", cfg=cfg)
         self.assertEqual(llm.calls, 3)
+
+    def test_an_interleaved_call_does_not_reset_the_repeat_counter(self):
+        """Compared against DeepSeek Harness's repeat guard, which counts
+        CONSECUTIVE identical calls and therefore needs an explicit "bookkeeping
+        tools are transparent to the chain" rule so that
+        grep X -> todo_write -> grep X still counts as two.
+
+        Ours needs no such rule: it counts occurrences of one signature against
+        an unchanged world, so interleaving anything between them changes
+        nothing. Untested until the comparison went looking, and load-bearing."""
+        cfg = agent.RunConfig(max_calls=8,
+                              profile=profiles.replace(profiles.DEFAULT, plan=False,
+                                                       verify_rounds=0, repeat_limit=2))
+        llm = _ScriptedLLM([self.call("list_emails"), self.call("think", thought="a"),
+                            self.call("list_emails"), self.call("think", thought="b"),
+                            self.call("list_emails")])
+        agent.run_harness(llm, self.world, self.mem, "look repeatedly", cfg=cfg)
+        self.assertEqual(len(self.executed("list_emails")), 2,
+                         "the interleaved think must not hand out a fresh budget")
+
+    def test_the_repeat_key_ignores_argument_order(self):
+        """The other behaviour the comparison checked. json.dumps(sort_keys=True)
+        is already a canonical key, so two calls differing only in the order
+        their arguments were written count as identical."""
+        a = json.dumps({"t": "x", "a": {"b": 1, "a": 2}}, sort_keys=True, default=str)
+        b = json.dumps({"t": "x", "a": {"a": 2, "b": 1}}, sort_keys=True, default=str)
+        self.assertEqual(a, b)
+
+    def test_a_successful_write_hands_out_a_fresh_repeat_budget(self):
+        """The notion ours has that theirs does not: the counter is scoped to an
+        unchanged world, so the same call may legitimately return something new
+        once something has been written."""
+        cfg = agent.RunConfig(max_calls=8,
+                              profile=profiles.replace(profiles.DEFAULT, plan=False,
+                                                       verify_rounds=0, repeat_limit=1))
+        llm = _ScriptedLLM([self.call("list_events"),
+                            self.call("add_event", title="X", date="2026-07-23",
+                                      start_time="10:00", end_time="11:00"),
+                            self.call("list_events")])
+        agent.run_harness(llm, self.world, self.mem, "look, write, look again", cfg=cfg)
+        self.assertEqual(len(self.executed("list_events")), 2,
+                         "the write should have reset the budget for the read")
 
     def test_a_guard_note_lands_immediately_before_the_message_it_produced(self):
         """The contract the web UI depends on: it holds the guard name from the

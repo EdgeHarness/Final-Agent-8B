@@ -82,8 +82,14 @@ not a bug fix, so it is recorded rather than made.
   `plan=False`, so by default the two plan-dependent guards never arm at all.
   `--profile llama3.1:8b` forces planning on and is how the finding above was
   measured: hold the model fixed, vary the profile.
-- **Arms run in sequence, never in parallel**, because the loop still keeps one
-  configuration in module globals. The ablation switch saves and restores that
-  global. This rig is the concrete reason to thread a config object instead.
+- **Arms run in sequence.** An arm is a `RunConfig` value now, so running two
+  at once looks available. It is not, yet, and the reason is specific: the tool
+  registry is still shared and process-level, and `tools.edit_registry`
+  disposers are only sound while nothing else moves the registry between the
+  moment one is built and the moment it runs. Two concurrent arms that both
+  enable MCP, or both call a `restrict_` function, would interleave their
+  inverses and tear down to the wrong state. **Parallel arms are safe only while
+  every arm leaves the registry alone**, which today means no MCP and no
+  `--root`.
 - **Four tasks is a smoke suite, not a benchmark.** It is enough to catch a
   guard that stopped working and not enough to rank two harnesses.

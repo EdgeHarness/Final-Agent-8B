@@ -62,6 +62,29 @@ guard. A spelling mistake moved the safety checks.
 real tool is still dropped. Free prose must never enter the context as a plan
 step.
 
+## Derive rather than mutate, and the inverse is free
+
+**The rule.** If a change can be made by producing a new value instead of
+altering a shared one, produce the new value. A derived change needs no undo,
+because recovery is discarding it.
+
+Reach for a tracked inverse only when the thing being changed is genuinely
+shared. The tool registry is: one dict, many readers, so
+`tools.edit_registry` returns a real disposer and they run LIFO. A run's
+configuration is not: `RunConfig.without_guard` returns a fresh value and
+nothing has to be restored.
+
+The evaluation rig got this wrong first. Ablating a guard meant patching
+`agent.GUARDS` and putting it back, which is an in-place change to something
+that wanted to be a derived one. It cost a save-and-restore helper and a test
+asserting the helper worked, both deleted once the config became a value.
+
+**The precondition on the other half.** A tracked inverse is only sound while
+nothing else moves the shared thing between the moment the inverse is built and
+the moment it runs. Single-threaded LIFO satisfies that. Concurrency does not,
+automatically, and the failure is silent: teardown restores a state that was
+never current.
+
 ## Question once, never forbid, and the wording is load-bearing
 
 **The rule.** Every guard fires one corrective message and lets the model

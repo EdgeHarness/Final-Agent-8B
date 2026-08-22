@@ -62,6 +62,7 @@ tools. `make pydeps` installs them. The launchers (`Agent Lab.ps1`,
 | path | what |
 |---|---|
 | `harness/` | the loop, the tool registry, the safety layers — the only place loop behaviour is defined |
+| `bench/` | the evaluation rig: graded tasks, and one arm per guard so an ablation is a number |
 | `agents/8b/` | the agent: its config, runner, workspace, memory and run logs |
 | `webui/` | Agent Lab, a loopback console that shows the loop working |
 | `mcp/` | the real-account server registry, and a self-test that needs no credentials |
@@ -156,6 +157,15 @@ copy of the exchange before restating the task.
 
 **Budget honesty.** Plan, verify and every repair round are paid out of the same
 call counter as ordinary tool calls. The scaffolding does not get free turns.
+
+**What a new domain has to provide.** The loop needs four things from a world:
+`actions`, `file_names()`, `snapshot()` and `log()`. That list is measured
+rather than designed — they are the only members `harness/agent.py` and the
+execution layer touch — and `harness/world.py` names it as `WORLD_CONTRACT`.
+Everything else on `World` is the simulated office, reached only by that
+domain's tools. A test drives a real episode against a world implementing the
+four and nothing else, so the claim is checked by running rather than by
+reading.
 
 Detail: [notes/Agent Loop.md](notes/Agent%20Loop.md) ·
 [notes/Harness Repair.md](notes/Harness%20Repair.md) ·

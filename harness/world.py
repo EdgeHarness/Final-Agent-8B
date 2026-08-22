@@ -13,6 +13,34 @@ SIM_TODAY = datetime.date(2026, 7, 20)  # a Monday
 SIM_TODAY_HUMAN = "Monday, July 20, 2026"
 
 
+# The surface a world must provide for the LOOP to run against it. Measured,
+# not designed: these are the only members harness/agent.py and the execution
+# layer in harness/tools.py actually touch.
+#
+#   actions      every executed call, which the verifier reads as evidence and
+#                the bench graders read as the record of what happened
+#   file_names() what is on disk, so the unread-file guard can tell a file the
+#                run was told about from one it invented
+#   snapshot()   persist, called in a finally so a crash cannot lose a write
+#   log(...)     record one executed call
+#
+# Everything else on World below - the inbox, the calendar, messages, reminders
+# - is the SIMULATED OFFICE DOMAIN, reached only by that domain's tools. A new
+# domain implements the four above and brings its own.
+#
+# This is the whole seam. It is written down because "world.py is a concrete
+# class and nothing enforces the shape" was the audit's complaint, and because
+# a domain author should not have to read the loop to find out what is required
+# of them.
+WORLD_CONTRACT = ("actions", "file_names", "snapshot", "log")
+
+
+def missing_world_members(obj):
+    """Which parts of the contract an object does not provide. Empty means it
+    can drive the loop."""
+    return tuple(name for name in WORLD_CONTRACT if not hasattr(obj, name))
+
+
 class ToolError(Exception):
     """Raised by world/tool operations with a message meant for the model."""
 

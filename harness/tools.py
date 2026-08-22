@@ -284,7 +284,15 @@ _ABSENT = object()
 def edit_registry(changes, registry=None):
     """Apply {name: spec, other: None} and return a callable restoring exactly
     the previous state. None removes. The undo is idempotent and restores what
-    was shadowed, not merely what was added."""
+    was shadowed, not merely what was added.
+
+    PRECONDITION, and it is not theoretical: the disposers are only sound while
+    nothing else moves the registry between the moment one is built and the
+    moment it runs. LIFO in a single thread satisfies that. Two CONCURRENT runs
+    both touching the registry would interleave their inverses and the teardown
+    would restore the wrong state. RunConfig makes parallel runs look available;
+    they are safe only while every one of them leaves the registry alone.
+    """
     reg = registry if registry is not None else TOOLS
     before = {n: reg.get(n, _ABSENT) for n in changes}
     for name, spec in changes.items():
