@@ -9,9 +9,9 @@ tags: [howto]
 The agent runs from `standalone/agents/8b/`. There is one copy, and it is that
 one.
 
-[run_agent.py](../standalone/agents/8b/run_agent.py) computes its import root as
+[run_agent.py](../agents/8b/run_agent.py) computes its import root as
 `dirname(dirname(HERE))`
-([run_agent.py:50-52](../standalone/agents/8b/run_agent.py#L50-L52)), so it has
+([run_agent.py:50-52](../agents/8b/run_agent.py#L50-L52)), so it has
 to sit at `<project>/agents/<size>/` with `<project>/harness/` beside it —
 which is exactly where it is, resolving `standalone/` as the project root.
 
@@ -24,7 +24,7 @@ which is exactly where it is, resolving `standalone/` as the project root.
 
 ## Invoking it
 
-As shipped ([run.ps1](../standalone/agents/8b/run.ps1)) it targets a Windows lab
+As shipped ([run.ps1](../agents/8b/run.ps1)) it targets a Windows lab
 machine and a pinned interpreter:
 
 ```powershell
@@ -73,9 +73,9 @@ A healthy run prints, before any model call:
 ```
 
 Those numbers come from the `llama3.1:8b` entry in
-[profiles.py:119-126](../standalone/harness/profiles.py#L119-L126) — see
+[profiles.py:119-126](../harness/profiles.py#L119-L126) — see
 [[Harness Profiles]]. If the endpoint is not loopback the runner asserts out
-before any of it ([run_agent.py:195](../standalone/agents/8b/run_agent.py#L195)).
+before any of it ([run_agent.py:195](../agents/8b/run_agent.py#L195)).
 
 ## What to expect at 8B
 

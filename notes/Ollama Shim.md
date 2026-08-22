@@ -5,11 +5,11 @@ cssclasses: [topic-runtime]
 
 # Ollama Shim
 
-[ollama_shim.py](../standalone/llamacpp/ollama_shim.py) — ~150 lines of stdlib
+[ollama_shim.py](../llamacpp/ollama_shim.py) — ~150 lines of stdlib
 Python that speaks Ollama's wire protocol in front of `llama-server`, so
 `agents/8b` runs against [[llama.cpp Backend|llama.cpp]] **unmodified**.
 
-It exists only because [llm.py:7](../standalone/harness/llm.py#L7) hardcodes
+It exists only because [llm.py:7](../harness/llm.py#L7) hardcodes
 `OLLAMA_URL` as a module constant with no env override, and
 [[Agent Loop|the loop]] reads Ollama's response shape. The shim takes port
 11434 so the harness cannot tell the difference.
@@ -92,7 +92,7 @@ The shim is one option of three:
 
 1. **Shim on 11434** — zero harness changes. What is built.
 2. **Point the harness at llama-server directly** — rewrite `chat()` in
-   [llm.py](../standalone/harness/llm.py) for `/v1/chat/completions`, ~30 lines
+   [llm.py](../harness/llm.py) for `/v1/chat/completions`, ~30 lines
    in one file. One less process; breaks compatibility with Ollama.
 3. **`llama-cpp-python` in-process** — no HTTP at all, the agent loads the model
    itself. Maximally direct; loses the server's slot management and needs the

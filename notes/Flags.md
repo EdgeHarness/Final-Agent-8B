@@ -4,7 +4,7 @@ tags: [reference]
 
 # Flags
 
-Parsed in `parse_flags()` ([run_agent.py:76-128](../standalone/agents/8b/run_agent.py#L76-L128)).
+Parsed in `parse_flags()` ([run_agent.py:76-128](../agents/8b/run_agent.py#L76-L128)).
 Everything not recognised as a flag is joined with spaces and becomes the task.
 
 | flag | effect |
@@ -26,8 +26,8 @@ Everything not recognised as a flag is joined with spaces and becomes the task.
 ## Notes
 
 - With no task on the command line the runner prompts interactively
-  ([run_agent.py:224-228](../standalone/agents/8b/run_agent.py#L224-L228)); an empty answer exits.
-- `--root` and `--shell` also read from [config.json](../standalone/agents/8b/config.json) as `root`
+  ([run_agent.py:224-228](../agents/8b/run_agent.py#L224-L228)); an empty answer exits.
+- `--root` and `--shell` also read from [config.json](../agents/8b/config.json) as `root`
   and `allow_shell`; the flag wins.
 - `--small` and `--deep` each set `tiers` implicitly.
 - `--root` overrides the [[Harness Profiles|profile]] budget for every model

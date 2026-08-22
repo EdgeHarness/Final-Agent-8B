@@ -5,7 +5,7 @@ cssclasses: [topic-core]
 
 # Agent Lab
 
-The demo frontend: [standalone/webui/](../standalone/webui/), launched by
+The demo frontend: [standalone/webui/](../webui/), launched by
 [Agent Lab.command](../Agent%20Lab.command). A local web console where you type
 a task and watch the [[Agent Loop|loop]] run — plan, every token as it is
 written, each tool call, the harness's repairs and the verifier, and the agent's
@@ -54,7 +54,7 @@ rather than a blank.
 
 ## Decks that look like decks
 
-[office.py](../standalone/harness/office.py) used to hand python-pptx a title
+[office.py](../harness/office.py) used to hand python-pptx a title
 and a bullet list and accept the default 4:3 template. It now renders a designed
 deck: **16:9**, a cover with a full-height accent bar, content slides with a
 title rule, bullet sizing that shrinks as a slide fills, slide numbers, and one

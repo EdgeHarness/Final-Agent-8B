@@ -21,23 +21,23 @@ run.ps1
        └─ harness/agent.py       run_raw() and run_harness(): the two loops
 ```
 
-Source: [standalone/harness/](../standalone/harness/) — see [[Running the Agent]]
+Source: [standalone/harness/](../harness/) — see [[Running the Agent]]
 for why there are two copies of the agent folder.
 
 ## What the runner owns
 
-[run_agent.py](../standalone/agents/8b/run_agent.py) is a thin shell, byte-identical across every
-model-size folder; only [config.json](../standalone/agents/8b/config.json) differs. It:
+[run_agent.py](../agents/8b/run_agent.py) is a thin shell, byte-identical across every
+model-size folder; only [config.json](../agents/8b/config.json) differs. It:
 
 1. reads the config and asserts the Ollama URL is local
-   ([run_agent.py:195](../standalone/agents/8b/run_agent.py#L195))
+   ([run_agent.py:195](../agents/8b/run_agent.py#L195))
 2. resolves the [[Harness Profiles|profile]] for the model and installs it
-   ([run_agent.py:199-201](../standalone/agents/8b/run_agent.py#L199-L201))
+   ([run_agent.py:199-201](../agents/8b/run_agent.py#L199-L201))
 3. parses [[Flags|flags]] and settles the LLM call budget
 4. opens `workspace/` as a **persistent** [[Persistent State|world]] and
    `memory/memory.jsonl`
 5. builds a plain `LLM` or a tiered [[Model Tiers|ModelRouter]]
-   ([run_agent.py:131-147](../standalone/agents/8b/run_agent.py#L131-L147))
+   ([run_agent.py:131-147](../agents/8b/run_agent.py#L131-L147))
 6. calls `run_harness(llm, world, mem, task)`
 7. prints what happened and writes `logs/run_NNN.json`
 
@@ -48,7 +48,7 @@ The runner does not pass options down — it *sets globals* on `harness.agent`:
 | global | set when | effect |
 |---|---|---|
 | `PROFILE` | always, via `set_profile()` | every tuning knob ([[Harness Profiles]]) |
-| `MAX_CALLS` | always | the shared budget for plan, act, repair and verify |
+| `MAX_CALLS` | default only | the shared budget for plan, act, repair and verify. A run may carry its own in `RunConfig`, which is what the evaluation rig uses to run two configurations in one process |
 | `EXTRA_RULES` | `--root` | appends real-file rules to the system prompt |
 | `EXTRA_WRITE_TOOLS` | `--root` | teaches loop-breaking which new tools write |
 | `SIM_TODAY` / `SIM_TODAY_HUMAN` | `--root` | swaps the fixed clock for today |
@@ -65,11 +65,13 @@ watch a run live.
 ## Design rule visible throughout
 
 Every extension is bolted on *outside* the graded core.
-[fs_tools.py](../standalone/harness/fs_tools.py) and
-[mcp_bridge.py](../standalone/harness/mcp_bridge.py) inject their tools into the
+[fs_tools.py](../harness/fs_tools.py) and
+[mcp_bridge.py](../harness/mcp_bridge.py) inject their tools into the
 shared registry **in that process only**, and `bench/` imports neither — so
-raw-vs-harness stays comparable with runs already on disk. The benchmark is the
-fixed point; the agents are the variations.
+raw-vs-harness stays comparable across runs. The benchmark is the fixed point;
+the agents are the variations.
+
+**Comparability note, 2026-08-22.** This no longer holds against runs recorded before that date. Making the loop domain-neutral removed three office sentences from the system prompt, so the graded prompt is not byte-identical to what older numbers were measured against. Runs from 2026-08-22 onward are comparable with each other.
 
 ## Related
 

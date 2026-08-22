@@ -158,6 +158,18 @@ copy of the exchange before restating the task.
 **Budget honesty.** Plan, verify and every repair round are paid out of the same
 call counter as ordinary tool calls. The scaffolding does not get free turns.
 
+**What a tool declares.** The loop asks the registry rather than carrying lists
+of tool names, so a domain gets the cross-checks by declaring facts about its
+own tools:
+
+| key | means |
+|---|---|
+| `effect` | `read`, `revertible_write`, `withheld_emission` or `unrecoverable_emission`. Required; an undeclared tool counts as world-changing |
+| `opens` | extensions this tool can read, e.g. `(".xlsx",)` |
+| `writes_file` | this tool produces a file |
+| `lists_files` | this tool enumerates a directory, so its result is not the task naming a file |
+| `simulated_connector` | this tool stands in for something a real account replaces, so MCP mode drops it |
+
 **What a new domain has to provide.** The loop needs four things from a world:
 `actions`, `file_names()`, `snapshot()` and `log()`. That list is measured
 rather than designed — they are the only members `harness/agent.py` and the
@@ -197,8 +209,14 @@ follow a plan it is only a premature cut-off, which is why the 8B carries real
 headroom. The GenieX NPU bundles resolve to the same profile as their Ollama
 equivalents, by parameter count parsed from the tag rather than by family.
 
-The benchmark never sets a profile; it runs the default, so graded runs stay
-comparable with runs already on disk.
+The benchmark never sets a profile; it runs the default.
+
+**It no longer follows that graded runs are comparable with runs recorded before
+2026-08-22.** Making the loop domain-neutral meant taking three office sentences
+out of the system prompt, so the graded prompt is not byte-identical to what
+older numbers were produced against. That was a deliberate trade, made because
+those sentences were instructing every model in every domain, and it is stated
+here because the previous wording promised a comparability the change removed.
 
 Detail: [notes/Harness Profiles.md](notes/Harness%20Profiles.md)
 
@@ -245,8 +263,10 @@ Detail: [notes/Determinism.md](notes/Determinism.md)
 **This README is the front door, and the source is the authority.** Where a
 document and the code disagree, the code is right.
 
-[agents/8b/README.md](agents/8b/README.md) has the agent-level detail: the full
-16-tool registry, what persists between runs, model tiers, every flag.
+[agents/8b/README.md](agents/8b/README.md) has the agent-level detail: the
+registry, what persists between runs, model tiers, every flag. It says 16 tools;
+there are 17 since `list_files` was added, and the count is deliberately not
+repeated here so there is only one place for it to go stale.
 
 `notes/` is a working Obsidian vault, kept because it holds the reasoning behind
 decisions the code cannot state. It is written for Obsidian, so most notes use

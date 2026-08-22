@@ -5,7 +5,7 @@ cssclasses: [topic-core]
 
 # Harness Profiles
 
-[profiles.py](../standalone/harness/profiles.py) — one frozen dataclass per
+[profiles.py](../harness/profiles.py) — one frozen dataclass per
 model size. The harness engine is one codebase; the profile is the set of knobs
 that governs it.
 
@@ -13,7 +13,7 @@ that governs it.
 > succeed differently.
 
 The runner resolves and installs it before the loop starts
-([run_agent.py:199-201](../standalone/agents/8b/run_agent.py#L199-L201)):
+([run_agent.py:199-201](../agents/8b/run_agent.py#L199-L201)):
 
 ```python
 profile = profiles.for_model(cfg["model"], cfg.get("harness"))
@@ -69,13 +69,13 @@ The curve is not monotonic. Scaffolding is not a ladder you climb — a 1B and a
 
 ## Resolution order
 
-`for_model(tag, override)` ([profiles.py:153](../standalone/harness/profiles.py#L153)):
+`for_model(tag, override)` ([profiles.py:153](../harness/profiles.py#L153)):
 
 1. exact tag match
 2. same base family — `llama3.2:1b-instruct-q4` finds `llama3.2:1b`'s family
 3. `DEFAULT`, so an unrecognised model still runs
 
-A `harness` block in [config.json](../standalone/agents/8b/config.json) then patches individual
+A `harness` block in [config.json](../agents/8b/config.json) then patches individual
 fields, filtered against the dataclass so an unknown key is ignored rather than
 crashing. This folder's config sets none, so `llama3.1:8b` gets stock
 **balanced**.
@@ -90,7 +90,7 @@ mode is not headroom, it is a runaway with a longer leash.
 
 > [!note] The benchmark never sets a profile
 > `bench/` runs with `DEFAULT` so the [[Raw vs Harness]] comparison stays
-> byte-identical to runs already on disk. `DEFAULT` is the plain `Profile()`:
+> byte-identical across runs. **Comparability note, 2026-08-22.** This no longer holds against runs recorded before that date. Making the loop domain-neutral removed three office sentences from the system prompt, so the graded prompt is not byte-identical to what older numbers were measured against. Runs from 2026-08-22 onward are comparable with each other. `DEFAULT` is the plain `Profile()`:
 > plan on at 6 steps, 2 verify rounds, `repeat_limit` **1**, 700 tokens, 8192
 > context, 14 calls — so `DEFAULT` and the 8B profile now differ on both
 > `repeat_limit` and `max_calls`.

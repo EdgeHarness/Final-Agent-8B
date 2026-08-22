@@ -27,7 +27,7 @@ same call budget, ten pieces of scaffolding added or removed.
 | [[Architecture]] | The component stack — what sits between `run.ps1` and the model |
 | [[Agent Loop]] | Plan → act → verify, and every repair stage in between |
 | [[Raw vs Harness]] | The ablation: what the scaffolding is actually worth |
-| [[Tools]] | The 14-tool registry, and what real mode swaps in |
+| [[Tools]] | The tool registry, what each tool declares, and what real mode swaps in |
 | [[Persistent State]] | What survives between runs, and how to factory-reset |
 | [[Real-Computer Mode]] | `--root`, the sandbox guardrails, the confirmation flow |
 | [[Model Tiers]] | `--tiers`, role routing, the LoRA adapter seam |

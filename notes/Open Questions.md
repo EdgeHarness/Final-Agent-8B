@@ -17,7 +17,7 @@ whichever copy you run is the one that learns.
 
 ## The deny-list does nothing on macOS
 
-`_DENY_WRITE` ([fs_tools.py:36](../standalone/harness/fs_tools.py#L36)) is
+`_DENY_WRITE` ([fs_tools.py:36](../harness/fs_tools.py#L36)) is
 entirely Windows paths and `C:\Users\Lab User\SAIL\…` literals. Under
 [[Real-Computer Mode|--root]] on this machine, layer 2 of three is inert; only
 the root containment check applies. Port the entries, or note the mode as
@@ -25,7 +25,7 @@ Windows-only.
 
 ## Run-log numbering collides
 
-`n = len(os.listdir(log_dir)) + 1` ([run_agent.py:308](../standalone/agents/8b/run_agent.py#L308))
+`n = len(os.listdir(log_dir)) + 1` ([run_agent.py:308](../agents/8b/run_agent.py#L308))
 counts *files*, not runs. With [[Model Tiers|--tiers]], `model_calls.jsonl`
 takes a slot, so numbering jumps. Delete a log and the next run silently
 overwrites an existing `run_NNN.json`. Max-of-existing-indices, or a timestamp
@@ -34,13 +34,13 @@ name, would be safer.
 ## Unknown flags become task text
 
 `parse_flags()` appends anything unrecognised to the task
-([run_agent.py:125-127](../standalone/agents/8b/run_agent.py#L125-L127)), so `--tier` (typo) is not an
+([run_agent.py:125-127](../agents/8b/run_agent.py#L125-L127)), so `--tier` (typo) is not an
 error — it becomes part of the prompt. Cheap fix: reject leading-`--` tokens.
 
 ## Verifier fails open, silently
 
 On a verifier exception *or* a malformed reply, `_verify` returns
-`{"complete": True}` ([agent.py:486-493](../standalone/harness/agent.py#L486-L493)).
+`{"complete": True}` ([agent.py:486-493](../harness/agent.py#L486-L493)).
 Right call for not trapping the agent, but a systematically broken verifier is
 indistinguishable from a clean run in the transcript. Worth noting the fallback
 distinctly in the episode log.

@@ -6,8 +6,8 @@ cssclasses: [topic-core]
 # Model Tiers
 
 `--tiers` routes calls through
-[model_router.py](../standalone/harness/model_router.py) instead of the plain
-`LLM` client ([run_agent.py:131-147](../standalone/agents/8b/run_agent.py#L131-L147)). `ModelRouter` is
+[model_router.py](../harness/model_router.py) instead of the plain
+`LLM` client ([run_agent.py:131-147](../agents/8b/run_agent.py#L131-L147)). `ModelRouter` is
 a drop-in for `LLM` — same `.chat(messages, force_json=, num_predict=, role=)`
 and the same `.calls` / `.output_tokens` / `.wall` counters — so
 [[Agent Loop|run_harness]] accepts either object unchanged, and the shared
@@ -26,7 +26,7 @@ Every model call already carries a role; without `--tiers` it is only a label.
 
 ## One model resident
 
-The default lineup ([model_router.py:34](../standalone/harness/model_router.py#L34))
+The default lineup ([model_router.py:34](../harness/model_router.py#L34))
 points `driver`, `router` and `verifier` at **one base tag**, so exactly one
 model stays in RAM. `deep` is marked `on_demand` with `keep_alive: "0"` — Ollama
 loads it for that call and evicts it immediately, so it never co-resides for
@@ -59,8 +59,8 @@ are swallowed (`except OSError: pass`) so a read-only disk cannot kill a run.
 
 ## Config-driven alternative
 
-A `router` block in [config.json](../standalone/agents/8b/config.json) enables the router without the
-flag ([run_agent.py:136](../standalone/agents/8b/run_agent.py#L136)) and can pin `base`, `small`,
+A `router` block in [config.json](../agents/8b/config.json) enables the router without the
+flag ([run_agent.py:136](../agents/8b/run_agent.py#L136)) and can pin `base`, `small`,
 `deep`, or a full `roles` map. This folder's config has no such block.
 
 ## The LoRA seam

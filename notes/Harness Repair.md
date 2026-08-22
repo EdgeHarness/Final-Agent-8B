@@ -27,11 +27,11 @@ it wrote `to_addr`.
 
 | # | stage | fixes | cost |
 |---|---|---|---|
-| 1 | [`parse_lenient`](../standalone/harness/agent.py#L79) | fences, prose around the JSON, trailing commas, unbalanced tails | free |
-| 2 | [`repair_args`](../standalone/harness/agent.py#L252) | near-miss parameter names, unknown keys | free |
-| 3 | [`normalize_args`](../standalone/harness/agent.py#L167) | `"2pm"` → `"14:00"`, `"tomorrow"` → an ISO date | free |
+| 1 | [`parse_lenient`](../harness/agent.py#L79) | fences, prose around the JSON, trailing commas, unbalanced tails | free |
+| 2 | [`repair_args`](../harness/agent.py#L252) | near-miss parameter names, unknown keys | free |
+| 3 | [`normalize_args`](../harness/agent.py#L167) | `"2pm"` → `"14:00"`, `"tomorrow"` → an ISO date | free |
 | 4 | `validate_call` | anything still wrong — feedback carries the tool's own example | 1 call |
-| 5 | [`task_date_mismatch`](../standalone/harness/agent.py#L213) + plan checks | a date the task did not mean, an unplanned write, a write before the read you planned | 1 call |
+| 5 | [`task_date_mismatch`](../harness/agent.py#L213) + plan checks | a date the task did not mean, an unplanned write, a write before the read you planned | 1 call |
 | 6 | loop-break | the same call against an unchanged world | 1 call |
 
 ### 1–3 are silent

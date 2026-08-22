@@ -5,9 +5,15 @@ cssclasses: [topic-runtime]
 
 # llama.cpp Backend
 
-Running the agent on [[Snapdragon X Elite|the Yoga]] without Ollama. Config
-lives in [standalone/llamacpp/](../standalone/llamacpp/); the long-form writeup
-with sources is [its README](../standalone/llamacpp/README.md).
+Running the agent on [[Snapdragon X Elite|the Yoga]] without Ollama.
+
+> [!warning] Not in the repository
+> This note used to link to `standalone/llamacpp/` and a README inside it.
+> Neither is reachable: the flatten removed the `standalone/` prefix, and
+> `llamacpp/` is git-excluded in full, so nothing there is tracked and the
+> README does not exist anywhere. The config is local to the lab machine, by
+> design, because that directory also holds the OpenRouter shim and its key.
+> Read the shim sources on the machine itself.
 
 Nothing here forks llama.cpp. Everything that makes a Snapdragon fast is
 already upstream — it is reached through the toolchain, the build flags, the

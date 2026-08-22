@@ -12,7 +12,7 @@ default; `--mcp` turns it on.
     python3 agents/8b/run_agent.py --mcp-help        <- what each server needs
     python3 agents/8b/run_agent.py --mcp NAME --mcp-list   <- what the model will see
 
-Full operational guide: [mcp/README.md](../standalone/mcp/README.md).
+Full operational guide: [mcp/README.md](../mcp/README.md).
 
 ## The missing half
 
@@ -23,10 +23,10 @@ are worth pointing at.
 
 | piece | does |
 |---|---|
-| [mcp/servers.json](../standalone/mcp/servers.json) | the registry — data, not code. Adding a provider never touches the harness |
-| [harness/mcp_config.py](../standalone/harness/mcp_config.py) | names → launchable configs. Command resolution, `~`/`${VAR}` expansion, the tool-count guard |
+| [mcp/servers.json](../mcp/servers.json) | the registry — data, not code. Adding a provider never touches the harness |
+| [harness/mcp_config.py](../harness/mcp_config.py) | names → launchable configs. Command resolution, `~`/`${VAR}` expansion, the tool-count guard |
 | `--mcp` in [[Running the Agent|run_agent.py]] and `webui/runner.py` | the call sites |
-| [mcp/selftest_server.py](../standalone/mcp/selftest_server.py) | a fake mailbox, so the wiring is testable with no credentials |
+| [mcp/selftest_server.py](../mcp/selftest_server.py) | a fake mailbox, so the wiring is testable with no credentials |
 
 ## What it costs
 

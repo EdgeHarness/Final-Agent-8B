@@ -5,7 +5,7 @@ cssclasses: [topic-core]
 
 # Tools
 
-`TOOLS` in [tools.py:20](../standalone/harness/tools.py#L20) is a plain dict.
+`TOOLS` in [tools.py:20](../harness/tools.py#L20) is a plain dict.
 Each entry carries `desc`, `params` as `{name: (type_description, required)}`,
 an `example` call, and a `run` lambda. Both [[Raw vs Harness|loops]] share it;
 the raw prompt renders the docs *without* the examples, the harness prompt *with*.
@@ -46,7 +46,7 @@ auto-injects — an explicit lookup should out-reach the automatic one.
 ## Which tools count as writes
 
 The [[Agent Loop#Repeat budget — not a hard dedupe|repeat budget]] treats these
-as world-changing ([agent.py:356](../standalone/harness/agent.py#L356)):
+as world-changing ([agent.py:356](../harness/agent.py#L356)):
 
 `send_email` · `add_event` · `send_message` · `set_reminder` ·
 `create_presentation` · `create_spreadsheet` · `save_memory`
@@ -59,14 +59,14 @@ as world-changing ([agent.py:356](../standalone/harness/agent.py#L356)):
 [[Real-Computer Mode]] adds `list_dir`, `read_file`, `write_file`,
 `append_file`, `delete_path`, `move_path`, `search_files` — plus `run_command`
 with `--shell`. The office tools are **dropped**
-(`fs_tools.restrict_to_files()`, [run_agent.py:235](../standalone/agents/8b/run_agent.py#L235)) — a
+(`fs_tools.restrict_to_files()`, [run_agent.py:235](../agents/8b/run_agent.py#L235)) — a
 fake inbox is a known distraction for a small model doing real work.
 `--with-office` keeps both sets. The meta tools (`think`, `save_memory`,
 `recall_memories`, `done`) survive either way.
 
 ## Errors are observations
 
-`execute()` ([tools.py:173](../standalone/harness/tools.py#L173)) never raises:
+`execute()` ([tools.py:173](../harness/tools.py#L173)) never raises:
 `ToolError` becomes `ERROR: <message>`, a `KeyError` becomes
 `missing required parameter 'x'`, and any other exception is caught so a tool
 bug cannot kill the episode. Every attempt — successful or not — is appended to

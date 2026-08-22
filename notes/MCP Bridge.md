@@ -5,7 +5,7 @@ cssclasses: [topic-safety]
 
 # MCP Bridge
 
-[mcp_bridge.py](../standalone/harness/mcp_bridge.py), ~380 lines — the protocol
+[mcp_bridge.py](../harness/mcp_bridge.py), ~380 lines — the protocol
 layer. It was written before anything called it; [[Real Accounts]] is the
 configuration and the call sites that turned it on.
 
@@ -27,7 +27,7 @@ Deliberately identical to [[Real-Computer Mode|fs_tools]]:
 | `shutdown()` | terminates the subprocesses (also `atexit`) |
 | `mail_rules(mode)` | prompt text explaining the mode's limits to the model |
 
-`bench/` never imports it, so the simulated 14-tool registry and the
+`bench/` never imports it, so the simulated registry and the
 [[Raw vs Harness]] comparison are untouched.
 
 ## Safety: three guards, all on by default
