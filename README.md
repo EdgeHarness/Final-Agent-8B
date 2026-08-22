@@ -22,6 +22,29 @@ this codebase look over-careful.
 
 Two backends. **Both own port 11434, so never run both.**
 
+### macOS and Linux
+
+```sh
+pip install requests python-pptx openpyxl   # the harness will not import without them
+python3 -m webui.server                     # Agent Lab at http://127.0.0.1:8765
+```
+
+Or double-click `Agent Lab.command`, which installs those packages on first
+run, starts Ollama if it is not already up, and opens the lab.
+
+Headless:
+
+```sh
+python3 -m bench.run --list                 # the graded tasks and arms
+python3 -m tests.test_harness               # the suite; stdlib only, no pytest
+```
+
+`make` is **not** an option here: the Makefile sets `SHELL := powershell.exe`
+and its `doctor` target reads Snapdragon hardware through CIM. It is for the
+lab machine.
+
+### Windows, on the X Elite
+
 ```powershell
 winget install --id ezwinports.make    # make is not installed by default
 
@@ -51,9 +74,14 @@ The shim is the whole NPU integration: the harness only ever talks to
 code, no loop behaviour, no UI changes. See
 [notes/NPU Serving.md](notes/NPU%20Serving.md).
 
-Prerequisites are `requests`, plus `python-pptx` and `openpyxl` for the document
-tools. `make pydeps` installs them. The launchers (`Agent Lab.ps1`,
-`Agent Lab.command`) install them on first run and start the backend for you.
+**Prerequisites are not optional.** `requests`, `python-pptx` and `openpyxl`
+are imported at module scope by `harness/office.py`, which every other module
+reaches through `harness/tools.py`, so without them nothing imports at all,
+including the test suite. `make pydeps` installs them on Windows; elsewhere use
+the pip line above. Both launchers (`Agent Lab.ps1`, `Agent Lab.command`)
+install them on first run and start the backend for you.
+
+Python 3.9 is enough: the sources compile clean on stock macOS Python.
 
 ---
 
