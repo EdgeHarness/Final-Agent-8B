@@ -10,8 +10,11 @@ import datetime
 import json
 import os
 import sys
+import re
+import subprocess
 import tempfile
 import unittest
+import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -1291,6 +1294,117 @@ class TestWorldContract(unittest.TestCase):
                               "list_emails", "add_event", "files_dir"):
             self.assertTrue(hasattr(w, office_member))
             self.assertNotIn(office_member, world_mod.WORLD_CONTRACT)
+
+
+
+# ------------------------------------------------------------------- docs ---
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Markdown links, minus the protocol ones and pure anchors.
+_MD_LINK = re.compile(r"\]\(([^)]+)\)")
+
+
+def _tracked(pattern="*"):
+    out = subprocess.run(["git", "ls-files", "-z", "--", pattern],
+                         cwd=REPO_ROOT, capture_output=True)
+    if out.returncode != 0:
+        return None
+    return [f for f in out.stdout.decode().split("\0") if f]
+
+
+def _tracked_markdown():
+    """Tracked .md files only.
+
+    Tracked, not globbed, because docs/ is deliberately untracked working
+    material: a stale link in a scratch document is nobody's problem, and a
+    stale link in something that ships is."""
+    return _tracked("*.md")
+
+
+def _reachable_after_clone():
+    """Every path a person who clones this repository actually receives.
+
+    Files AND the directories implying them, so a link to `../harness/` is
+    satisfied by `harness/agent.py` being tracked.
+
+    This is the oracle rather than os.path.exists, and the difference is the
+    whole point: os.path.exists answers from MY working tree, which holds
+    untracked files a cloner never gets. The first version of this test used it
+    and passed here while failing on a clean clone, which is the same trap as a
+    grader that cannot fail, arriving from a third direction."""
+    files = _tracked()
+    if files is None:
+        return None
+    reachable = set(files)
+    for f in files:
+        parts = f.split("/")
+        for i in range(1, len(parts)):
+            reachable.add("/".join(parts[:i]))
+    return reachable
+
+
+class TestDocumentLinks(unittest.TestCase):
+    """Nothing checked that a document link resolved, so a rename could break
+    every reference to what it renamed and nothing would say so.
+
+    That is not hypothetical. The flatten that removed the standalone/ prefix
+    broke roughly ninety links across eighteen notes, and the vault stayed
+    un-navigable for twenty-seven iterations because the only check was me
+    remembering to run one by hand."""
+
+    def test_every_link_in_a_tracked_document_resolves(self):
+        files = _tracked_markdown()
+        if files is None:
+            self.skipTest("not a git checkout")
+        self.assertGreater(len(files), 20, "suspiciously few documents found")
+        reachable = _reachable_after_clone()
+        broken = []
+        for path in files:
+            base = os.path.dirname(path)
+            with open(os.path.join(REPO_ROOT, path), encoding="utf-8") as fh:
+                body = fh.read()
+            for match in _MD_LINK.finditer(body):
+                target = match.group(1)
+                if target.startswith(("http://", "https://", "mailto:", "#")):
+                    continue
+                # An anchor on a real file is fine; the heading is not checked,
+                # because heading anchors are far more fragile than paths and a
+                # test nobody can keep green gets deleted.
+                rel = urllib.parse.unquote(target.split("#")[0])
+                if not rel:
+                    continue
+                resolved = os.path.normpath(os.path.join(base, rel)).replace(os.sep, "/")
+                if resolved not in reachable:
+                    broken.append(f"{path} -> {target}")
+        self.assertEqual(broken, [],
+                         "links in tracked documents that a fresh clone cannot follow")
+
+    def test_the_check_would_actually_catch_a_break(self):
+        """A link checker that passes on everything is the same failure mode as
+        a grader that cannot fail. This asserts the matcher sees a bad path."""
+        found = _MD_LINK.findall("see [x](../standalone/harness/agent.py) and "
+                                 "[y](https://example.com) and [z](#anchor)")
+        self.assertEqual(found, ["../standalone/harness/agent.py",
+                                 "https://example.com", "#anchor"])
+        reachable = _reachable_after_clone()
+        self.assertNotIn("standalone/harness/agent.py", reachable)
+        self.assertIn("harness/agent.py", reachable)
+        self.assertIn("harness", reachable, "a link to a directory must resolve")
+
+    def test_an_untracked_file_does_not_satisfy_a_link(self):
+        """The failure a clean clone found. llamacpp/ is git-excluded in full,
+        so its files exist in a working tree and in no clone. A link to one
+        passed here and broke for everybody else."""
+        reachable = _reachable_after_clone()
+        if not os.path.exists(os.path.join(REPO_ROOT, "llamacpp")):
+            # SKIP, not fail. A clean clone does not have llamacpp/ at all,
+            # which is the very fact under test, so there is nothing here to
+            # check rather than something wrong. Asserting instead of skipping
+            # made this test fail on exactly the clean clone it was written to
+            # protect.
+            self.skipTest("llamacpp/ is absent, which is what a clone looks like")
+        self.assertNotIn("llamacpp/ollama_shim.py", reachable)
+        self.assertNotIn("llamacpp", reachable)
 
 
 # ------------------------------------------------------------------- memory ---

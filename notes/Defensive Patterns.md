@@ -122,6 +122,45 @@ dropped it and there was no symptom to notice. The name reached the run log, so
 the only clue was its absence from a screen nobody was comparing against a
 transcript.
 
+## A working tree is not the artifact
+
+**The rule.** Verify against a clean clone, not against the directory you have
+been editing in. Yours holds untracked files, a virtualenv, generated state and
+local config that nobody who clones this repository receives.
+
+The link checker written to protect the repository **passed here and failed on a
+clean clone**, because its oracle was `os.path.exists` and the file it was
+looking for is git-excluded. The fix is to ask `git ls-files` what a cloner
+actually gets, and to check against that.
+
+Cloning again immediately found a second fault: the test guarding itself with an
+assertion that a local-only directory exists **failed** in the clone, where the
+right verdict was skip. A precondition that cannot hold is a reason not to run,
+not a reason to report failure.
+
+Both were invisible from a working tree, and neither would ever have surfaced
+without cloning and running.
+
+## A rename breaks every reference and nothing tells you
+
+**The rule.** If a document can point at a file, something automated has to
+check that the file is there. Otherwise the only check is a person remembering,
+and people remember for about a week.
+
+Flattening `standalone/` into the root broke roughly **ninety links across
+eighteen notes** in a single commit. The vault stayed un-navigable for
+twenty-seven iterations. Nobody was careless: the change was correct, the tests
+were green, and the suite had no opinion about documents at all.
+
+`TestDocumentLinks` now walks every tracked `.md`, resolves each relative link
+against its own directory, and reports all the broken ones rather than the
+first. It reads tracked files only, because a stale link in untracked working
+material is nobody's problem and a stale link in something that ships is.
+
+Anchors are deliberately unchecked. Heading anchors are far more fragile than
+paths, and a test nobody can keep green gets deleted, which costs more than the
+anchors were worth.
+
 ## A token you invented resolves to nothing
 
 **The rule.** Before using a CSS variable, grep that it is defined. An undefined

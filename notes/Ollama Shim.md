@@ -5,9 +5,14 @@ cssclasses: [topic-runtime]
 
 # Ollama Shim
 
-[ollama_shim.py](../llamacpp/ollama_shim.py) — ~150 lines of stdlib
-Python that speaks Ollama's wire protocol in front of `llama-server`, so
-`agents/8b` runs against [[llama.cpp Backend|llama.cpp]] **unmodified**.
+`llamacpp/ollama_shim.py` — ~150 lines of stdlib Python that speaks Ollama's
+wire protocol in front of `llama-server`, so `agents/8b` runs against
+[[llama.cpp Backend|llama.cpp]] **unmodified**.
+
+> [!note] Not linked, because it is not in the repository
+> `llamacpp/` is git-excluded in full: it also holds the OpenRouter shim and
+> its key. The file is on the lab machine, not in a clone, so this names the
+> path rather than offering a link nobody else can follow.
 
 It exists only because [llm.py:7](../harness/llm.py#L7) hardcodes
 `OLLAMA_URL` as a module constant with no env override, and
