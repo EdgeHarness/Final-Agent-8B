@@ -257,6 +257,11 @@ async function selectAgent(id) {
   S.seen = {};
   renderAgents();
   syncModel();
+  /* Which real accounts a run will reach is a property of the agent, so the
+     options summary is stale the moment the agent changes. Repainting only on
+     input meant the row said "none" until something was clicked, which is
+     exactly when it mattered most. */
+  paintOptDots();
   await loadWorkspace();
   $('run').disabled = !!S.run;
 }
@@ -1646,10 +1651,21 @@ function paintOptDots() {
      works; this is the only one that decides whether it can touch live mail. */
   const conn = mcpSelected();
   const mode = $('opt-mcp-mode').value;
-  if (conn.length) on.unshift(mode === 'live' ? `${conn.length} live` : `${conn.length} real`);
-  $('conn-state').textContent = conn.length
-    ? `${conn.length} · ${mode === 'read_only' ? 'read only' : mode}` : 'none';
-  $('conn-state').classList.toggle('hot', conn.length > 0 && mode === 'live');
+  /* Ticking nothing does not mean connecting to nothing. The agent's own
+     config.json can enable servers, and a run with no explicit selection falls
+     through to it, so this row read "none" while every run opened a live
+     mailbox. It reports what the next run will actually connect to, and says
+     where that came from. */
+  const agent = S.agents.find((x) => x.id === S.agent) || {};
+  const fallback = conn.length ? [] : (agent.mcp_default || []);
+  const live = conn.length ? conn : fallback;
+  const liveMode = conn.length ? mode : (agent.mcp_default_mode || mode);
+  if (live.length) on.unshift(liveMode === 'live' ? `${live.length} live` : `${live.length} real`);
+  $('conn-state').textContent = live.length
+    ? `${live.length} · ${liveMode === 'read_only' ? 'read only' : liveMode}`
+      + (fallback.length ? ' · from config' : '')
+    : 'none';
+  $('conn-state').classList.toggle('hot', live.length > 0 && liveMode === 'live');
   $('opt-dots').textContent = on.join(' · ');
   /* The two rows that take a value show it on the row, so the menu still reads
      as set or unset once it is closed and reopened. */

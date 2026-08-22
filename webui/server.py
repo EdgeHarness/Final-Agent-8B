@@ -151,6 +151,12 @@ def agent_list():
             "catalog": catalog_for(cfg["model"]),
             "profile": profile.to_dict(),
             "installed": tag_installed(cfg["model"], tags),
+            # What this agent connects to when a run does not say otherwise.
+            # The options panel used to show only the checkboxes, so it read
+            # "Real accounts: none" while the config quietly enabled a live
+            # mailbox for every run.
+            "mcp_default": list((cfg.get("mcp") or {}).get("enable") or []),
+            "mcp_default_mode": (cfg.get("mcp") or {}).get("mode") or "draft",
             "files": len(os.listdir(files_dir)) if os.path.isdir(files_dir) else 0,
             "runs": len([f for f in os.listdir(logs_dir) if f.startswith("run_")])
                     if os.path.isdir(logs_dir) else 0,

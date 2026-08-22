@@ -272,7 +272,9 @@ def main():
     p.add_argument("--thread", default=None,
                    help="conversation thread id; earlier turns enter the prompt")
     p.add_argument("--mcp", default=None,
-                   help="comma-separated MCP servers from mcp/servers.json")
+                   help="comma-separated MCP servers from mcp/servers.json; "
+                        "'none' forces no real accounts even when the agent "
+                        "config enables some")
     p.add_argument("--mcp-mode", default=None,
                    choices=["draft", "live", "read_only"],
                    help="draft (default) composes but never transmits")
@@ -315,8 +317,16 @@ def main():
         agent_mod.SIM_TODAY_HUMAN = today.strftime("%A, %B %d, %Y")
 
     mcp_cfg = cfg.get("mcp") or {}
-    names = ([s.strip() for s in args.mcp.split(",") if s.strip()] if args.mcp
-             else mcp_cfg.get("enable") or [])
+    # --mcp is the override; the agent's config is the default when it is not
+    # given at all. "none" (or an empty --mcp) is an explicit override meaning
+    # NO real accounts, which is the only way to say that from the command line
+    # when a config enables some: before this, an empty --mcp fell through to
+    # the config and there was no way to turn them off without editing it.
+    if args.mcp is None:
+        names = mcp_cfg.get("enable") or []
+    else:
+        asked = [s.strip() for s in args.mcp.split(",") if s.strip()]
+        names = [] if asked in ([], ["none"], ["off"]) else asked
     mcp_mode = args.mcp_mode or mcp_cfg.get("mode") or "draft"
     mcp_summary = None
     if names:
