@@ -367,6 +367,12 @@ def main():
                   else "files + office world" if root else "office world"),
          tiers=tiers, today=agent_mod.SIM_TODAY_HUMAN,
          tools=sorted(tools_mod.TOOLS), profile=profile.to_dict(),
+         # The effect class of every registered tool. The UI used to keep its
+         # own literal set of "tools that change something" and it had already
+         # drifted: update_event and cancel_event were missing, so moving or
+         # cancelling a meeting rendered exactly like reading one.
+         effects={n: sp.get("effect", "unrecoverable_emission")
+                  for n, sp in tools_mod.TOOLS.items()},
          mcp=({"mode": mcp_mode, "servers": mcp_summary,
                "warnings": mcp_config.count_warnings(mcp_summary)}
               if mcp_summary else None))

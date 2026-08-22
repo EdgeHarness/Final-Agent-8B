@@ -43,6 +43,7 @@ import subprocess
 import threading
 import time
 
+from . import tools
 from .tools import TOOLS
 from .world import ToolError
 
@@ -423,25 +424,27 @@ def _register(client, tool, server_cfg, prefix, draft_only, seen_names):
 
 # ---------------------------------------------------------------- enable ----
 
-_KEEP_ALWAYS = {"think", "save_memory", "recall_memories", "done",
-                "create_presentation", "create_spreadsheet", "read_spreadsheet"}
-
-
 def restrict_to_mcp(keep_office_docs=True, keep_extra=()):
-    """Drop the simulated-office tools (fake inbox/calendar/messages) so a
-    real-account agent isn't confused by having both list_emails and a real
-    Gmail list tool. Keeps think/memory/done, the injected MCP tools, and
-    optionally the real .pptx/.xlsx writers. Process-local; bench/ is unaffected.
+    """Drop the simulated-connector tools (fake inbox, calendar, messages) so a
+    real-account agent is not carrying both list_emails and a real Gmail list
+    tool. Two list-mail tools is a coin flip for a small model.
+    Process-local; bench/ is unaffected.
 
-    keep_extra spares tools another module injected — pass fs_tools.injected()
-    when --root and --mcp are both on, or the real file tools get dropped here
-    along with the simulated ones."""
-    keep = set(_INJECTED) | set(keep_extra) | (
-        {"think", "save_memory", "recall_memories", "done"}
-        if not keep_office_docs else _KEEP_ALWAYS)
-    for name in list(TOOLS):
-        if name not in keep:
-            TOOLS.pop(name, None)
+    This used to be an ALLOW-list naming the seven tools that survived, which
+    meant every base-layer tool added afterwards silently vanished the moment
+    MCP was on. Found by adding list_files and watching the model be told
+    'unknown tool list_files' in a real run. It is a DROP-list now, derived
+    from what each tool declares, so a new tool survives unless it says it is
+    simulating something a real account replaces.
+
+    keep_extra spares tools another module injected. It is no longer strictly
+    needed, since a dropped tool must now opt in to being dropped, but it is
+    kept so a caller can protect a tool that does declare itself."""
+    drop = tools.simulated_connector_tools() - set(_INJECTED) - set(keep_extra)
+    if not keep_office_docs:
+        drop |= tools.document_tools() - set(_INJECTED) - set(keep_extra)
+    for name in drop:
+        TOOLS.pop(name, None)
 
 
 def enable(servers, confirm=None, mode="draft"):

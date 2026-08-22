@@ -121,6 +121,28 @@ class World:
         except OSError:
             return set()
 
+    def list_files(self):
+        """What is in the workspace, for the model rather than for the loop.
+
+        The agent had sixteen tools and no way to see its own files: it could
+        create a spreadsheet and read one back by name, but only if something
+        had already told it the name. A workspace it cannot enumerate is a
+        workspace it can only guess at."""
+        rows = []
+        for name in sorted(self.file_names()):
+            path = os.path.join(self.files_dir, name)
+            try:
+                st = os.stat(path)
+            except OSError:      # deleted between listing and stat
+                continue
+            rows.append({
+                "name": name,
+                "bytes": st.st_size,
+                "modified": datetime.datetime.fromtimestamp(
+                    st.st_mtime).strftime("%Y-%m-%d %H:%M"),
+            })
+        return rows or "the workspace has no files yet"
+
     # ---- email ----
     def list_emails(self):
         rows = sorted(self.emails, key=lambda e: e["date"], reverse=True)

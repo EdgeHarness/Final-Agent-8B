@@ -75,12 +75,28 @@ function icon(name, size = 15) {
 
 /* A call that changes the world, rather than reading it. The dot on the
    timeline is green for these and blue for a read, so the shape of a run is
-   legible before a word of it is read. */
-const MUTATORS = new Set([
-  'send_email', 'add_event', 'send_message', 'set_reminder', 'save_memory',
-  'create_presentation', 'create_spreadsheet',
+   legible before a word of it is read.
+
+   This was a literal list maintained here by hand, and it had drifted from the
+   harness: update_event and cancel_event were missing, so moving or cancelling
+   a meeting rendered exactly like reading one. The banner now carries the
+   effect class the harness itself assigned to every registered tool, and this
+   set is rebuilt from it at the start of each run. The literal below is only
+   the value before the first banner arrives. */
+let MUTATORS = new Set([
+  'send_email', 'add_event', 'update_event', 'cancel_event', 'send_message',
+  'set_reminder', 'save_memory', 'create_presentation', 'create_spreadsheet',
   'write_file', 'append_file', 'delete_path', 'move_path', 'run_command',
 ]);
+
+/* Anything the harness did not call a read changes the world. Keeping the
+   default on the side of "changes something" matches the harness, where a tool
+   with no declared effect is treated as the most dangerous thing it could be
+   rather than the safest. */
+function applyEffects(effects) {
+  if (!effects) return;                       // an older runner: keep the literal
+  MUTATORS = new Set(Object.keys(effects).filter((n) => effects[n] !== 'read'));
+}
 
 /* Which argument names the file a tool produced. Office files land in the
    agent's workspace, which is what /api/preview can read, so those get a real
@@ -880,6 +896,9 @@ function endPlan() {
 
 function onBanner(e) {
   resetRun();
+  /* Before anything renders: the harness is the authority on which tools change
+     the world, and it just told us. */
+  applyEffects(e.effects);
   meters(0, e.budget);
   const n = push('act');
   n.append(el('div', 'banner-task', e.task));

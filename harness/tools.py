@@ -45,6 +45,7 @@ WORLD_CHANGING = frozenset(EFFECTS) - {"read"}
 TOOLS = {
     "list_emails": {
         "effect": "read",
+        "simulated_connector": True,
         "desc": "List all emails in the inbox (id, from, date, subject). Newest first.",
         "params": {},
         "example": {"tool": "list_emails", "args": {}},
@@ -52,6 +53,7 @@ TOOLS = {
     },
     "read_email": {
         "effect": "read",
+        "simulated_connector": True,
         "desc": "Read the full body of one email by its id.",
         "params": {"id": ("string, an email id like 'e3'", True)},
         "example": {"tool": "read_email", "args": {"id": "e2"}},
@@ -59,6 +61,7 @@ TOOLS = {
     },
     "send_email": {
         "effect": "unrecoverable_emission",
+        "simulated_connector": True,
         "desc": "Send an email.",
         "params": {"to": ("string, recipient address", True),
                    "subject": ("string", True),
@@ -69,6 +72,7 @@ TOOLS = {
     },
     "list_events": {
         "effect": "read",
+        "simulated_connector": True,
         "desc": "List calendar events, optionally only for one date.",
         "params": {"date": ("string YYYY-MM-DD, optional - omit for all events", False)},
         "example": {"tool": "list_events", "args": {"date": "2026-07-22"}},
@@ -76,6 +80,7 @@ TOOLS = {
     },
     "add_event": {
         "effect": "revertible_write",
+        "simulated_connector": True,
         "desc": "Add an event to the calendar.",
         "params": {"title": ("string", True),
                    "date": ("string YYYY-MM-DD", True),
@@ -91,6 +96,7 @@ TOOLS = {
     },
     "update_event": {
         "effect": "revertible_write",
+        "simulated_connector": True,
         "desc": "Change an existing calendar event: move it, rename it, or change who is "
                 "coming. Give only the fields you are changing. Use this to move or "
                 "reschedule a meeting - adding a new event leaves the old one in place.",
@@ -109,6 +115,7 @@ TOOLS = {
     },
     "cancel_event": {
         "effect": "revertible_write",
+        "simulated_connector": True,
         "desc": "Remove an event from the calendar.",
         "params": {"id": ("string, an event id like 'c2' from list_events", True)},
         "example": {"tool": "cancel_event", "args": {"id": "c4"}},
@@ -116,6 +123,7 @@ TOOLS = {
     },
     "send_message": {
         "effect": "unrecoverable_emission",
+        "simulated_connector": True,
         "desc": "Send a chat/instant message to a person.",
         "params": {"to": ("string, contact name", True),
                    "text": ("string, the message", True)},
@@ -124,6 +132,7 @@ TOOLS = {
     },
     "set_reminder": {
         "effect": "revertible_write",
+        "simulated_connector": True,
         "desc": "Set a reminder for yourself at a specific date and time.",
         "params": {"text": ("string, what to be reminded of", True),
                    "date": ("string YYYY-MM-DD", True),
@@ -160,6 +169,21 @@ TOOLS = {
                                       ["Total", "=SUM(B2:B3)"]]}},
         "run": lambda w, m, a: office.create_spreadsheet(w.files_dir, a["filename"], a["rows"],
                                                          a.get("sheet_name")),
+    },
+    "list_files": {
+        "effect": "read",
+        # A listing is not a mention. The loop harvests filenames out of read
+        # results so it can tell a file the task pointed at from one the model
+        # invented, and without this flag enumerating the workspace would mark
+        # every file in it as something the task named - so the next document
+        # write would be questioned about an arbitrary file nobody asked for.
+        "lists_files": True,
+        "desc": "List the files in the workspace, with size and when each was "
+                "last changed. Use it to find out what is here before you "
+                "assume a file does or does not exist.",
+        "params": {},
+        "example": {"tool": "list_files", "args": {}},
+        "run": lambda w, m, a: w.list_files(),
     },
     "read_spreadsheet": {
         "effect": "read",
@@ -239,6 +263,24 @@ def opener_for(path, registry=None):
         if any(low.endswith(ext.lower()) for ext in (spec.get("opens") or ())):
             return name
     return None
+
+
+def simulated_connector_tools(registry=None):
+    """Tools that simulate a connector a real account would replace.
+
+    A run with real mail wired in should not also carry a fake inbox: two
+    list-mail tools is a coin flip for a small model. Declared per tool so the
+    MCP bridge can drop exactly these and leave everything else standing.
+    """
+    reg = registry if registry is not None else TOOLS
+    return frozenset(n for n, s in reg.items() if s.get("simulated_connector"))
+
+
+def document_tools(registry=None):
+    """Tools that read or write a document file, either direction."""
+    reg = registry if registry is not None else TOOLS
+    return frozenset(n for n, s in reg.items()
+                     if s.get("writes_file") or s.get("opens"))
 
 
 def file_writing_tools(registry=None):

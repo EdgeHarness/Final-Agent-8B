@@ -270,18 +270,22 @@ def _run_command(a):
 
 _FS_TOOLS = {
     "list_dir": {
+        "effect": "read",
+        "lists_files": True,
         "desc": "List the files and folders in a directory on the real computer.",
         "params": {"path": ("string, folder path relative to the working root; omit for the root itself", False)},
         "example": {"tool": "list_dir", "args": {"path": "."}},
         "run": lambda w, m, a: _list_dir(a),
     },
     "read_file": {
+        "effect": "read",
         "desc": "Read the text contents of a real file on this computer.",
         "params": {"path": ("string, path to the file", True)},
         "example": {"tool": "read_file", "args": {"path": _eg("notes", "todo.txt")}},
         "run": lambda w, m, a: _read_file(a),
     },
     "write_file": {
+        "effect": "revertible_write",
         "desc": "Create a real file, or replace its entire contents. Writes the exact text given.",
         "params": {"path": ("string, path to the file", True),
                    "content": ("string, the full text to write", True)},
@@ -290,6 +294,7 @@ _FS_TOOLS = {
         "run": lambda w, m, a: _write_file(a),
     },
     "append_file": {
+        "effect": "revertible_write",
         "desc": "Add one line to the end of a real file, creating it if needed.",
         "params": {"path": ("string, path to the file", True),
                    "text": ("string, the line to add", True)},
@@ -297,12 +302,14 @@ _FS_TOOLS = {
         "run": lambda w, m, a: _append_file(a),
     },
     "delete_path": {
+        "effect": "unrecoverable_emission",
         "desc": "Delete a real file or folder. This cannot be undone, so be certain first.",
         "params": {"path": ("string, path to delete", True)},
         "example": {"tool": "delete_path", "args": {"path": _eg("notes", "draft.txt")}},
         "run": lambda w, m, a: _delete_path(a),
     },
     "move_path": {
+        "effect": "revertible_write",
         "desc": "Move or rename a real file or folder.",
         "params": {"path": ("string, what to move", True),
                    "to": ("string, the new path", True)},
@@ -310,6 +317,7 @@ _FS_TOOLS = {
         "run": lambda w, m, a: _move_path(a),
     },
     "search_files": {
+        "effect": "read",
         "desc": "Search filenames and text files for a word or phrase, under a folder.",
         "params": {"query": ("string, the word or phrase to look for", True),
                    "path": ("string, folder to search in; omit for the whole root", False)},
@@ -317,6 +325,7 @@ _FS_TOOLS = {
         "run": lambda w, m, a: _search_files(a),
     },
     "run_command": {
+        "effect": "unrecoverable_emission",
         "desc": f"Run one {SHELL_NAME} command on this computer and read its output.",
         "params": {"command": ("string, the command line to run", True)},
         "example": {"tool": "run_command", "args": {"command": "git status --short"}},
@@ -325,8 +334,9 @@ _FS_TOOLS = {
 }
 
 # Tools that change the world — the harness loop uses this to decide when a
-# repeated identical call may be suppressed.
-WRITE_TOOLS = {"write_file", "append_file", "delete_path", "move_path", "run_command"}
+# repeated identical call may be suppressed. Derived from the effect each tool
+# declares above rather than listed again here, so the two cannot drift.
+WRITE_TOOLS = {n for n, s in _FS_TOOLS.items() if s["effect"] != "read"}
 
 # Kept in files-only mode alongside the file tools; everything else (the
 # simulated inbox/calendar/messages/office suite) is dropped.

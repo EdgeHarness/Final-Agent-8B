@@ -858,7 +858,13 @@ def run_harness(llm, world, mem, task_text, history=""):
                 # A filename the run was told about, from the result rather than
                 # from the model's own words: a model that writes "I'll check
                 # data.xlsx" has not been told anything.
-                _fre = filename_re()
+                #
+                # A directory listing is not a mention either, which is why a
+                # tool can declare lists_files to opt out. Enumerating the
+                # workspace would otherwise mark every file in it as something
+                # the task named, and the next document write would be
+                # questioned about an arbitrary file nobody asked for.
+                _fre = None if TOOLS.get(name, {}).get("lists_files") else filename_re()
                 if _fre:
                     g.mentioned_files.update(_fre.findall(str(obs)))
             if ok and (TOOLS.get(name, {}).get("opens")):

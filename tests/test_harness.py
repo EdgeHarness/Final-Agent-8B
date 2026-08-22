@@ -530,6 +530,155 @@ class TestGuardRegistry(unittest.TestCase):
             self.assertIn("it will run", msg, name)
 
 
+
+# --------------------------------------------------------------- list_files ---
+
+class TestListFiles(unittest.TestCase):
+    """The agent had sixteen tools and no way to see its own workspace: it
+    could create a spreadsheet and read one back by name, but only if something
+    had already told it the name."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.w = World(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _write(self, name, size=12):
+        with open(os.path.join(self.w.files_dir, name), "wb") as fh:
+            fh.write(b"x" * size)
+
+    def test_an_empty_workspace_says_so_rather_than_returning_nothing(self):
+        """An empty list renders as "[]", which a small model reads as an error
+        or as a tool that did not work."""
+        self.assertEqual(self.w.list_files(), "the workspace has no files yet")
+
+    def test_it_reports_name_size_and_when_it_changed(self):
+        self._write("q3.xlsx", 40)
+        rows = self.w.list_files()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["name"], "q3.xlsx")
+        self.assertEqual(rows[0]["bytes"], 40)
+        self.assertRegex(rows[0]["modified"], r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$")
+
+    def test_it_is_sorted_so_two_runs_read_the_same(self):
+        for n in ("c.xlsx", "a.xlsx", "b.xlsx"):
+            self._write(n)
+        self.assertEqual([r["name"] for r in self.w.list_files()],
+                         ["a.xlsx", "b.xlsx", "c.xlsx"])
+
+    def test_it_is_a_read_and_joins_the_read_set(self):
+        self.assertEqual(tools.effect_of("list_files"), "read")
+        self.assertIn("list_files", tools.read_tool_names())
+        self.assertNotIn("list_files", agent.world_changing_tools())
+
+    def test_it_runs_through_the_registry(self):
+        self._write("q3.xlsx")
+        ok, obs = execute("list_files", {}, self.w, None)
+        self.assertTrue(ok)
+        self.assertIn("q3.xlsx", obs)
+
+    def test_a_listing_does_not_count_as_the_task_naming_a_file(self):
+        """The load-bearing half. Filenames are harvested out of read results
+        so the unread-file guard can tell a file the task pointed at from one
+        the model invented. If a directory listing counted, enumerating the
+        workspace would mark every file in it as named by the task, and the
+        next document write would be questioned about an arbitrary file."""
+        self.assertTrue(TOOLS["list_files"].get("lists_files"))
+        self.assertFalse(TOOLS["read_spreadsheet"].get("lists_files"))
+
+    def test_the_guard_stays_quiet_after_a_listing_but_fires_after_a_read(self):
+        """The behaviour the flag buys, through the guard rather than the flag."""
+        self._write("q3.xlsx")
+        g = agent.GuardState(None, self.w, agent.Episode(), [], "make a sheet",
+                             agent.world_changing_tools(), "")
+        g.name, g.args = "create_spreadsheet", {}
+        # Nothing harvested from a listing, so nothing to question.
+        self.assertIsNone(agent.guard_unread_file(g))
+        # The same filename arriving from something the run actually read does
+        # arm it.
+        g.mentioned_files.add("q3.xlsx")
+        self.assertIn("q3.xlsx", agent.guard_unread_file(g))
+
+
+
+# ------------------------------------------------------ mcp tool restriction ---
+
+class TestRestrictToMcp(unittest.TestCase):
+    """restrict_to_mcp used to be an ALLOW-list naming the seven tools that
+    survived, so every base-layer tool added afterwards silently vanished the
+    moment MCP was on. Found by adding list_files and watching a real run tell
+    the model 'unknown tool list_files'."""
+
+    def setUp(self):
+        self.saved = dict(TOOLS)
+
+    def tearDown(self):
+        TOOLS.clear(); TOOLS.update(self.saved)
+
+    def test_it_drops_exactly_the_simulated_connectors(self):
+        from harness import mcp_bridge
+        before = set(TOOLS)
+        mcp_bridge.restrict_to_mcp()
+        self.assertEqual(before - set(TOOLS),
+                         {"list_emails", "read_email", "send_email", "list_events",
+                          "add_event", "update_event", "cancel_event",
+                          "send_message", "set_reminder"})
+
+    def test_a_new_base_layer_tool_survives_without_being_named_anywhere(self):
+        """The regression this inversion exists to prevent."""
+        from harness import mcp_bridge
+        TOOLS["some_future_tool"] = {"effect": "read", "desc": "", "params": {},
+                                     "example": {}, "run": None}
+        mcp_bridge.restrict_to_mcp()
+        self.assertIn("some_future_tool", TOOLS)
+        self.assertIn("list_files", TOOLS)
+
+    def test_think_memory_and_done_still_survive(self):
+        from harness import mcp_bridge
+        mcp_bridge.restrict_to_mcp()
+        for n in ("think", "save_memory", "recall_memories", "done"):
+            self.assertIn(n, TOOLS)
+
+    def test_dropping_the_document_tools_too_is_still_available(self):
+        from harness import mcp_bridge
+        mcp_bridge.restrict_to_mcp(keep_office_docs=False)
+        for n in ("create_spreadsheet", "create_presentation", "read_spreadsheet"):
+            self.assertNotIn(n, TOOLS)
+        self.assertIn("think", TOOLS)
+        self.assertIn("list_files", TOOLS,
+                      "listing the workspace is not a document tool")
+
+
+
+# ------------------------------------------------------- fs tool effects ---
+
+class TestFsToolEffects(unittest.TestCase):
+    def test_the_fs_write_set_is_derived_not_listed_twice(self):
+        self.assertEqual(set(fs_tools.WRITE_TOOLS),
+                         {"write_file", "append_file", "delete_path",
+                          "move_path", "run_command"})
+
+    def test_every_fs_tool_declares_a_valid_effect(self):
+        for name, spec in fs_tools._FS_TOOLS.items():
+            self.assertIn(spec.get("effect"), tools.EFFECTS, name)
+
+    def test_delete_and_shell_are_emissions_because_nothing_undoes_them(self):
+        """delete_path removes bytes this system cannot restore, and a command
+        can reach the network. Calling either revertible would be guessing in
+        the direction that costs something."""
+        self.assertEqual(fs_tools._FS_TOOLS["delete_path"]["effect"],
+                         "unrecoverable_emission")
+        self.assertEqual(fs_tools._FS_TOOLS["run_command"]["effect"],
+                         "unrecoverable_emission")
+
+    def test_listing_a_real_directory_is_not_the_task_naming_a_file(self):
+        """Same reason list_files carries the flag: a listing is not a mention."""
+        self.assertTrue(fs_tools._FS_TOOLS["list_dir"].get("lists_files"))
+        self.assertFalse(fs_tools._FS_TOOLS["read_file"].get("lists_files"))
+
+
 # ------------------------------------------------------------------- memory ---
 
 class TestMemory(unittest.TestCase):
