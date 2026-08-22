@@ -1005,6 +1005,73 @@ class TestBenchGraders(unittest.TestCase):
         self.assertIn("raw", arms)
         self.assertIn("harness", arms)
 
+    def test_the_export_grader_excludes_the_source_file(self):
+        """It shipped broken for one commit-worth of minutes: _sheet_text read
+        every xlsx including the seeded source, so the figures it looks for
+        were present whatever the agent did and the grader ALWAYS passed.
+        Caught only by checking the negative direction."""
+        bench_tasks._seed_export(self.w)
+        self.assertFalse(bench_tasks._check_export_copied(self.w)[0],
+                         "nothing written yet")
+        office.create_spreadsheet(self.w.files_dir, "clean.xlsx",
+                                  [["Region", "Q3"], ["West", 999]])
+        ok, why = bench_tasks._check_export_copied(self.w)
+        self.assertFalse(ok, "invented figures must not pass")
+        self.assertIn("invented", why)
+
+    def test_the_export_grader_passes_when_the_figures_were_copied(self):
+        bench_tasks._seed_export(self.w)
+        office.create_spreadsheet(
+            self.w.files_dir, "clean.xlsx",
+            [["Region", "Q3"]] + [[r, v] for r, v in bench_tasks.Q3_EXPORT])
+        self.assertTrue(bench_tasks._check_export_copied(self.w)[0])
+
+    def test_the_move_grader_separates_moved_from_duplicated(self):
+        """Three outcomes, not two: still there, moved, or moved by adding a
+        second one and leaving the first."""
+        self.assertFalse(bench_tasks._check_moved_not_duplicated(self.w)[0])
+        moved = World(tempfile.mkdtemp())
+        moved.update_event("c2", start_time="09:00", end_time="10:00")
+        self.assertTrue(bench_tasks._check_moved_not_duplicated(moved)[0])
+        dupe = World(tempfile.mkdtemp())
+        dupe.add_event("Design review", "2026-07-22", "09:00", "10:00")
+        ok, why = bench_tasks._check_moved_not_duplicated(dupe)
+        self.assertFalse(ok)
+        self.assertIn("2 Design reviews", why)
+
+    def test_a_task_may_seed_the_fixture_it_needs(self):
+        """Writing around a file is only a choice if the file is there and
+        something told the agent about it. The clean fixture has neither."""
+        self.assertEqual(self.w.file_names(), set())
+        bench_tasks._seed_export(self.w)
+        self.assertIn(bench_tasks.SOURCE_FILE, self.w.file_names())
+        self.assertTrue(any(bench_tasks.SOURCE_FILE in e["body"]
+                            for e in self.w.emails))
+
+    def test_the_stale_memory_grader_catches_the_wrong_answer(self):
+        """The failure it grades, observed live: a run had saved "Wednesday has
+        0 meetings", and the agent told a colleague their Wednesday was clear
+        without opening the calendar, which held three."""
+        self.assertFalse(
+            bench_tasks._check_memory_did_not_outrank_the_world(self.w)[0],
+            "no message at all is not a pass")
+        self.w.send_message("jordan", "Your Wednesday is completely free.")
+        ok, why = bench_tasks._check_memory_did_not_outrank_the_world(self.w)
+        self.assertFalse(ok)
+        self.assertIn("3 meetings", why)
+
+    def test_the_stale_memory_grader_passes_an_answer_from_the_calendar(self):
+        self.w.send_message("jordan", "You have 3 meetings on Wednesday.")
+        self.assertTrue(
+            bench_tasks._check_memory_did_not_outrank_the_world(self.w)[0])
+
+    def test_the_stale_memory_setup_reaches_the_store_the_loop_searches(self):
+        """A memory seeded anywhere else would never be injected, and the task
+        would grade a run that never saw the stale fact."""
+        mem = MemoryStore(os.path.join(tempfile.mkdtemp(), "m.jsonl"))
+        bench_tasks._seed_stale_memory(self.w, mem)
+        self.assertTrue(mem.search("Wednesday"))
+
     def test_an_arm_is_a_value_and_changes_nothing_globally(self):
         """Replaces test_dropping_a_guard_is_undone_afterwards, which asserted
         that bench_run._guards_without patched agent.GUARDS and restored it.
@@ -1045,6 +1112,90 @@ class TestBenchGraders(unittest.TestCase):
         g.name, g.args = "create_spreadsheet", {}
         self.assertIsNone(agent.guard_read_before_write(g),
                           "nothing in the plan to hold the model to")
+
+    def test_a_row_records_which_guards_actually_spoke(self):
+        """Without this a table of identical arms is ambiguous, and the
+        ambiguity flatters the rig: it could mean removing a guard changed
+        nothing, or it could mean no guard ever fired and the ablation measured
+        nothing at all. The first full ablation sweep was the second case."""
+        ep = agent.Episode()
+        ep.note("model", "{}")
+        ep.note("guard", "read_before_write")
+        ep.note("feedback", "you planned to look first")
+        ep.note("guard", "wrong_date")
+        self.assertEqual(bench_run.guards_fired(ep),
+                         ["read_before_write", "wrong_date"])
+
+    def test_an_episode_with_no_guard_reports_an_empty_list_not_none(self):
+        """An empty list and a missing key read the same in a table and mean
+        different things when summing across a sweep."""
+        self.assertEqual(bench_run.guards_fired(agent.Episode()), [])
+        self.assertEqual(bench_run.guards_fired(None), [])
+
+    def test_a_scripted_arm_fires_the_guard_the_failure_targets(self):
+        """The ablation that finally measures something. A scripted failure
+        needs no model, so this runs in the suite."""
+        task = dict(next(t for t in bench_tasks.TASKS if t["id"] == "receipts_sheet"),
+                    script=bench_tasks.SCRIPTS["receipts_sheet"])
+        row = bench_run.run_one("harness", task, "unused", 12,
+                                profiles.for_model("llama3.1:8b"))
+        self.assertIn("read_before_write", row["guards_fired"])
+
+    def test_ablating_that_guard_silences_it_and_nothing_else(self):
+        task = dict(next(t for t in bench_tasks.TASKS if t["id"] == "receipts_sheet"),
+                    script=bench_tasks.SCRIPTS["receipts_sheet"])
+        row = bench_run.run_one("harness-no-read_before_write", task, "unused", 12,
+                                profiles.for_model("llama3.1:8b"))
+        self.assertNotIn("read_before_write", row["guards_fired"])
+
+    def test_a_question_once_guard_does_not_change_the_outcome(self):
+        """Why the pass column cannot show guard value, pinned so nobody reads
+        an identical pass table as evidence of no effect. The guard speaks and
+        then lets an insisting model through: that IS the contract."""
+        task = dict(next(t for t in bench_tasks.TASKS if t["id"] == "receipts_sheet"),
+                    script=bench_tasks.SCRIPTS["receipts_sheet"])
+        withg = bench_run.run_one("harness", task, "unused", 12,
+                                  profiles.for_model("llama3.1:8b"))
+        without = bench_run.run_one("harness-no-read_before_write", task, "unused", 12,
+                                    profiles.for_model("llama3.1:8b"))
+        self.assertEqual(withg["passed"], without["passed"])
+        self.assertNotEqual(withg["guards_fired"], without["guards_fired"])
+
+    def _scripted(self, arm, task_id, max_calls=14):
+        task = dict(next(t for t in bench_tasks.TASKS if t["id"] == task_id),
+                    script=bench_tasks.SCRIPTS[task_id])
+        return bench_run.run_one(arm, task, "unused", max_calls,
+                                 profiles.for_model("llama3.1:8b"))
+
+    def test_every_registered_guard_has_a_scripted_failure(self):
+        """A guard with no script cannot be ablated meaningfully on this
+        machine, because no installed model reaches its failure."""
+        fired = set()
+        for task_id in bench_tasks.SCRIPTS:
+            fired.update(self._scripted("harness", task_id)["guards_fired"])
+        for name, _ in agent.GUARDS:
+            self.assertIn(name, fired, f"no scripted failure fires {name}")
+
+    def test_the_date_guard_fires_on_the_day_the_task_did_not_name(self):
+        self.assertIn("wrong_date", self._scripted("harness", "deep_work")["guards_fired"])
+        self.assertNotIn("wrong_date",
+                         self._scripted("harness-no-wrong_date", "deep_work")["guards_fired"])
+
+    def test_the_unplanned_write_guard_fires_on_a_send_nobody_planned(self):
+        self.assertIn("unplanned_write",
+                      self._scripted("harness", "read_only")["guards_fired"])
+        self.assertNotIn("unplanned_write",
+                         self._scripted("harness-no-unplanned_write",
+                                        "read_only")["guards_fired"])
+
+    def test_a_script_must_outlast_every_guard_that_questions_it(self):
+        """The artifact this nearly produced: two guards questioned deep_work
+        and each spent one attempt, so a two-attempt script reached done before
+        the event existed and the ABLATED arm passed while the full harness
+        failed. That reads as "the guard hurts" and is purely a short script.
+        With enough attempts both arms pass, which is the real answer."""
+        self.assertTrue(self._scripted("harness", "deep_work")["passed"])
+        self.assertTrue(self._scripted("harness-no-wrong_date", "deep_work")["passed"])
 
     def test_an_unknown_arm_is_refused_rather_than_silently_skipped(self):
         with self.assertRaises(SystemExit):

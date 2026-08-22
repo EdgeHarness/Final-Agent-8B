@@ -36,6 +36,23 @@ looks exactly like a real result.
 | `receipts_sheet` | the sheet holds 230.00, 87.50 and 412.30 | a plausible sheet full of numbers that are not the ones in the inbox |
 | `deep_work` | the event lands on Thursday 2026-07-23 | a date the model wrote itself silently landing on another day |
 | `message_jordan` | Jordan was messaged | a two-part task reported complete with one part done |
+| `export_copied` | the new sheet carries the Q3 column from `q3_raw.xlsx` | an email named the export, the agent never opened it, and invented rows with formulas over empty cells |
+| `stale_memory` | the message to Jordan does not contradict the calendar | a run had saved "Wednesday has 0 meetings" and the agent told a colleague their Wednesday was clear without opening the calendar, which held three |
+| `move_not_duplicate` | exactly one Design review, at 09:00 | "move it" answered with `add_event`, leaving the calendar claiming the meeting is at two times |
+
+`stale_memory` is the one grader that reads prose rather than structure, so it
+is fuzzy by nature: it looks for the words a wrong answer would use. **A vague
+message that commits to neither passes.** That is the lenient direction, which
+is the right way round for a grader reading free text: it will miss a wrong
+answer phrased unusually, and it will not invent a failure.
+
+A task's `setup` receives both the world and the memory store, because a memory
+seeded anywhere else is never injected and the task would grade a run that never
+saw the stale fact.
+
+`export_copied` seeds its own fixture through a task-level `setup` hook, because
+the failure only exists against one: writing around a file is a choice only when
+the file is there and something told the agent about it.
 
 `receipts_sheet` deliberately distinguishes **nothing written** from **wrong
 numbers**. They are different failures and a table that merges them hides the
@@ -46,6 +63,129 @@ one that matters.
 One episode per cell is an anecdote. `temperature=0` and `seed=42` hold for a
 local Ollama, but sampling still varies across builds and the OpenRouter shim
 is not deterministic at all. Use `--repeat` and compare pass counts.
+
+## The first measured baseline
+
+`llama3.2:1b`, its own profile, seven tasks, three episodes per cell,
+`--max-calls 10`. Raw against the full harness.
+
+| arm | passed | finished a run | mean calls | mean seconds |
+|---|---|---|---|---|
+| `raw` | **3 / 21** | **0 / 21** | 10.0 | 21.9 |
+| `harness` | **6 / 21** | 6 / 21 | 9.0 | 6.3 |
+
+Three things in that table are worth more than the pass column.
+
+**Raw never once called `done` successfully.** Not in twenty-one episodes. It
+does not fail the tasks so much as fail to finish at all, burning its whole
+budget on replies the loop cannot parse.
+
+**The harness is three and a half times faster per episode.** Same model, same
+budget, same tasks. The difference is not thinking time, it is raw spending
+calls on malformed output that deterministic repair would have fixed without a
+model call.
+
+**The entire pass difference is one task**, `message_jordan`: 3/3 against 0/3,
+consistent across every episode. At 1b both planning and the verifier are off,
+so what separated the arms was format repair and loop-breaking alone.
+
+**What this does not show.** Six of seven tasks fail in both arms, because a 1b
+cannot do them. This is a baseline, not a verdict on the harness: it says what
+the scaffolding is worth at the smallest model, on a suite deliberately built
+from things that go wrong. The interesting number is 0/21 finished, and it is
+about the model.
+
+Raw rows: `docs/results/` (untracked, machine-specific).
+
+## The ablation, and what it could not measure
+
+All four guards ablated against the baseline, same model, profile, repeat and
+budget. 105 episodes.
+
+| arm | total |
+|---|---|
+| `harness` | 6 / 21 |
+| `harness-no-wrong_date` | 6 / 21 |
+| `harness-no-unplanned_write` | 6 / 21 |
+| `harness-no-unread_file` | 6 / 21 |
+| `harness-no-read_before_write` | 6 / 21 |
+
+Identical, cell for cell. **That table is not the result it looks like.**
+
+A run of identical arms has two completely different readings: removing each
+guard changed nothing, or no guard ever fired so the ablation measured nothing.
+**The first flatters the rig and it was the wrong one.** No cross-check spoke in
+any of the 105 episodes.
+
+Why, per guard, all four for the same underlying reason: the 1b never gets far
+enough to trip one.
+
+- `unplanned_write`, `read_before_write` — need a plan; the 1b profile sets
+  `plan=False`.
+- `unread_file` — needs a document write after being told about a file. The 1b
+  never successfully writes a spreadsheet.
+- `wrong_date` — needs a write carrying a date. The 1b never successfully adds
+  an event.
+
+So every row now records `guards_fired`, and a sweep where none did says so in
+capitals rather than printing a tidy table. **An instrument that cannot tell "no
+effect" from "not measured" is worse than no instrument**, because the tidy
+table is the one that gets quoted.
+
+**What would make the ablation mean something:** a model that reaches the
+failures. That is a 3b or larger, and it is the single thing this rig most needs
+that this machine does not have.
+
+## Scripted arms, and why the pass column cannot measure a guard
+
+```sh
+python -m bench.run --scripted --profile llama3.1:8b
+```
+
+A **script** is the sequence of model replies that reproduces a documented
+failure exactly, so the guard meant to catch it is guaranteed to be presented
+with the thing it exists for. No model is called.
+
+This measures the **guard**, not the model. It is the question the real-model
+ablation cannot reach here, where no guard ever fires. **It is not a benchmark,
+and the two must never be reported together as though they measured the same
+thing.**
+
+Running it produced the sharpest thing the rig has said so far.
+
+All four guards have a recorded failure, and a test asserts that: a guard with
+no script cannot be ablated meaningfully here, because no installed model
+reaches its failure.
+
+| script | fires |
+|---|---|
+| `receipts_sheet` | `read_before_write` |
+| `export_copied` | `unread_file` |
+| `deep_work` | `wrong_date` |
+| `read_only` | `unplanned_write` |
+
+Removing a guard empties exactly its cell in the guards-that-spoke table and
+leaves the others alone. That is the ablation working.
+
+**A script must be able to outlast every guard that questions it.** Two guards
+question `deep_work`, and each spends one attempt. A two-attempt script reached
+`done` before the event was ever created, so the **ablated** arm passed while
+the full harness failed. That reads as "the guard hurts" and is purely an
+artifact of a script too short to insist. With a third attempt both arms pass,
+which is the real answer. A test pins it.
+
+**The pass column is identical and always will be.** A question-once guard does
+not prevent a failure. It questions once and lets an insisting model through,
+and that is the entire contract, deliberately. A scripted failure that insists
+therefore produces the same outcome in every arm.
+
+So **pass/fail is the wrong column to read for guard value.** Firing is the
+measurable, and scripted mode prints it as its own table with that warning
+attached. Three tests pin it, including one asserting that ablating a guard
+changes what fired while leaving the outcome alone.
+
+This is worth stating because the obvious reading of an identical pass table is
+"the guard does nothing", and for this design that reading is wrong.
 
 ## The first thing this rig found
 

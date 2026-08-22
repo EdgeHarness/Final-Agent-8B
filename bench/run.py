@@ -34,6 +34,34 @@ from harness.memory import MemoryStore                    # noqa: E402
 from harness.world import World                           # noqa: E402
 
 
+class _ScriptedLLM:
+    """Replays a fixed sequence of model replies.
+
+    An arm driven by this measures the GUARD, not the model: the failure is
+    put in front of the check on purpose. That is the question the real-model
+    ablation cannot reach on this machine, where no guard ever fires because a
+    1b never gets far enough to trip one."""
+
+    def __init__(self, replies):
+        self.replies, self.calls, self._i = list(replies), 0, 0
+
+    def chat(self, messages, **kw):
+        self.calls += 1
+        reply = self.replies[min(self._i, len(self.replies) - 1)]
+        self._i += 1
+        return reply
+
+
+def guards_fired(ep):
+    """The cross-checks that actually spoke during one episode, in order.
+
+    Pulled out of run_one so it can be tested against a hand-built episode
+    rather than by grepping the source of the function that uses it."""
+    if ep is None:
+        return []
+    return [n["content"] for n in ep.transcript if n["kind"] == "guard"]
+
+
 def config_for(arm, max_calls, profile):
     """The RunConfig one arm runs under.
 
@@ -64,9 +92,15 @@ def run_one(arm, task, model, max_calls, profile):
     is a result and losing the whole sweep to it is not."""
     tmp = tempfile.mkdtemp(prefix="bench-")
     world = World(tmp)                       # fresh fixtures, not persistent
+    # A task may seed the world it needs. Some failures only exist against a
+    # specific fixture: writing around a file is only a choice if the file is
+    # there and something told the agent about it.
     mem = MemoryStore(os.path.join(tmp, "memory.jsonl"))
+    if task.get("setup"):
+        task["setup"](world, mem)
     cfg = config_for(arm, max_calls, profile)
-    llm = LLM(model, num_ctx=cfg.profile.num_ctx)
+    script = task.get("script")
+    llm = _ScriptedLLM(script) if script else LLM(model, num_ctx=cfg.profile.num_ctx)
     started = time.time()
     error = ""
     try:
@@ -77,10 +111,16 @@ def run_one(arm, task, model, max_calls, profile):
     except Exception as exc:                 # noqa: BLE001 - a crash is a datum
         ep, error = None, f"{type(exc).__name__}: {exc}"
     passed, reason = task["check"](world)
+    # Which cross-checks actually spoke. Without this a table of identical arms
+    # is ambiguous: it could mean removing a guard changed nothing, or it could
+    # mean no guard ever fired and the ablation measured nothing at all. Those
+    # are completely different results and the first reading flatters the rig.
+    fired = guards_fired(ep)
     return {
         "arm": arm, "task": task["id"], "passed": passed, "reason": reason,
         "calls": llm.calls, "seconds": round(time.time() - started, 1),
         "finished": bool(ep and ep.finished), "error": error,
+        "guards_fired": fired,
     }
 
 
@@ -97,6 +137,12 @@ def main():
                         "identical to the full harness and measure nothing.")
     p.add_argument("--arms", nargs="*", default=None)
     p.add_argument("--tasks", nargs="*", default=None)
+    p.add_argument("--scripted", action="store_true",
+                   help="replay each task's recorded failure instead of calling "
+                        "a model. Measures whether the GUARD still does its job "
+                        "when the failure is put in front of it, which the "
+                        "real-model ablation cannot reach here. Not a benchmark; "
+                        "never report the two together.")
     p.add_argument("--repeat", type=int, default=1,
                    help="episodes per (arm, task). One proves nothing.")
     p.add_argument("--max-calls", type=int, default=20)
@@ -106,6 +152,12 @@ def main():
 
     profile = profiles.for_model(args.profile or args.model)
     arms, chosen = arms_for(args.arms), task_mod.by_id(args.tasks)
+    if args.scripted:
+        chosen = [dict(t, script=task_mod.SCRIPTS[t["id"]]) for t in chosen
+                  if t["id"] in task_mod.SCRIPTS]
+        if not chosen:
+            raise SystemExit("no scripted failure recorded for those tasks; "
+                             f"have: {', '.join(sorted(task_mod.SCRIPTS))}")
     if args.list:
         print("arms :", ", ".join(arms_for(None)))
         print(f"profile: {args.profile or args.model} "
@@ -128,8 +180,12 @@ def main():
                       f"{row['calls']:3} calls  {row['seconds']:6.1f}s  {note}")
 
     print("\n" + "=" * 78)
-    print(f"model {args.model}   profile {args.profile or args.model}   "
+    print(f"model {'SCRIPTED (no model called)' if args.scripted else args.model}"
+          f"   profile {args.profile or args.model}   "
           f"plan={profile.plan}   repeat={args.repeat}")
+    if args.scripted:
+        print("Scripted: this measures the GUARD against a recorded failure, "
+              "not the model.")
     print(f"{'arm':28} " + "  ".join(f"{t['id'][:14]:>14}" for t in chosen) + "   total")
     for arm in arms:
         cells, won, ran = [], 0, 0
@@ -140,7 +196,36 @@ def main():
             ran += len(hits)
             cells.append(f"{ok}/{len(hits)}".rjust(14))
         print(f"{arm:28} " + "  ".join(cells) + f"   {won}/{ran}")
+    if args.scripted:
+        # For a QUESTION-ONCE guard, pass/fail cannot show value. The guard
+        # speaks and then lets an insisting model through, which is the whole
+        # contract, so a scripted failure that insists produces the same
+        # outcome in every arm. What differs, and what is worth reading, is
+        # whether the check spoke at all.
+        print(f"\n{'arm':28} " + "  ".join(f"{t['id'][:14]:>14}" for t in chosen)
+              + "   guards that spoke")
+        for arm in arms:
+            cells = []
+            for t in chosen:
+                hits = [r for r in rows if r["arm"] == arm and r["task"] == t["id"]]
+                names = sorted({g for r in hits for g in r.get("guards_fired", [])})
+                cells.append((",".join(n[:12] for n in names) or "-").rjust(14))
+            print(f"{arm:28} " + "  ".join(cells))
+        print("\nRead THIS table, not the pass column above: a question-once "
+              "guard does not\nprevent a failure, it questions it once and lets "
+              "an insisting model through.")
+
     print("=" * 78)
+    fired = {}
+    for r in rows:
+        for g in r.get("guards_fired", []):
+            fired[g] = fired.get(g, 0) + 1
+    if fired:
+        print("guards fired: " + ", ".join(f"{n} x{c}" for n, c in sorted(fired.items())))
+    else:
+        print("guards fired: NONE. Every arm above is identical because no "
+              "cross-check\n              ever spoke, not because removing one "
+              "made no difference.")
     print("Read the counts, not the verdicts. Sampling varies run to run, so a\n"
           "single episode per cell is an anecdote. Use --repeat.")
 
