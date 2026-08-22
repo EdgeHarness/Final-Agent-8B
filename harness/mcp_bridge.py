@@ -67,6 +67,9 @@ _WRITE_RE = re.compile(
     re.I)
 # Tools that actually TRANSMIT to another person. Dropped in draft mode.
 _TRANSMIT_RE = re.compile(r"(send|forward|reply)", re.I)
+# Tools that COMPOSE something a person must release. These are the point of
+# draft mode: the model writes, a human sends.
+_DRAFT_RE = re.compile(r"draft", re.I)
 
 
 # --------------------------------------------------------------- JSON-RPC ----
@@ -349,6 +352,24 @@ def _is_write(name, server_cfg):
     return bool(_WRITE_RE.search(name))
 
 
+def _effect_class(mcp_name, is_write):
+    """The effect class a real-account tool gets, from its name.
+
+    A read observes. A draft tool composes something a person must release, so
+    it is a withheld emission. Everything else that changes a real account is
+    called an unrecoverable emission, deliberately: from a name alone we cannot
+    tell whether a write reaches another party, and a calendar invite or a
+    shared-file edit does. Guessing revertible_write here would be guessing in
+    the one direction that costs something. Override the read/write split per
+    server with read_tools and write_tools when the heuristic is wrong.
+    """
+    if not is_write:
+        return "read"
+    if _DRAFT_RE.search(mcp_name) and not _TRANSMIT_RE.search(mcp_name):
+        return "withheld_emission"
+    return "unrecoverable_emission"
+
+
 def _make_executor(client, mcp_name, is_write):
     """The TOOLS 'run' callable. Confirms writes, raises ToolError on MCP error."""
     def run(world, mem, args):
@@ -386,6 +407,7 @@ def _register(client, tool, server_cfg, prefix, draft_only, seen_names):
     tag = "[real, needs confirmation] " if is_write else "[real, read-only] "
     hint = (server_cfg.get("arg_hints") or {}).get(mcp_name)
     TOOLS[harness_name] = {
+        "effect": _effect_class(mcp_name, is_write),
         "desc": tag + (desc or mcp_name),
         "params": _params_from_schema(schema, hint=hint,
                                       hide=server_cfg.get("hide_params") or ()),

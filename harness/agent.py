@@ -30,6 +30,7 @@ import json
 import re
 
 from .profiles import DEFAULT as _DEFAULT_PROFILE
+from . import tools
 from .tools import TOOLS, execute, tool_docs, validate_call
 from .world import SIM_TODAY, SIM_TODAY_HUMAN
 
@@ -398,11 +399,15 @@ PLAN_PROMPT = ('Which tools will you need to call to complete this task, in orde
 
 FILENAME_RE = re.compile(r"\b[\w.\-]+\.xlsx\b")
 
-# The tools that change something. Module level because the verifier needs the
-# same answer the loop uses when it decides what counts as a side effect.
-BASE_WRITE_TOOLS = frozenset({"send_email", "add_event", "update_event", "cancel_event",
-                              "send_message", "set_reminder", "create_presentation",
-                              "create_spreadsheet", "save_memory"})
+# The tools that change something, derived from the effect class each tool
+# declares in the registry rather than listed here. This used to be a literal
+# frozenset of nine office tool names, which meant a new domain's writes were
+# invisible to the repeat check, the date guard and the unrequested report
+# until somebody remembered to edit the set - the loop silently treated an
+# undeclared write as a read. A tool with no declared effect now counts as
+# world-changing: absence of a declaration is not permission.
+def world_changing_tools():
+    return tools.write_tool_names() | EXTRA_WRITE_TOOLS
 
 REPLAN_PROMPT = (
     'TASK: {task}\n\nYour plan was written before you had read anything:\n{plan}\n\n'
@@ -505,8 +510,7 @@ def run_harness(llm, world, mem, task_text, history=""):
     world_version = 0    # bumped on successful writes; a call's repeat budget is
                          # only spent while the world is unchanged, and resets
                          # the moment anything writes
-    write_tools = set(BASE_WRITE_TOOLS)
-    write_tools |= EXTRA_WRITE_TOOLS  # empty for the benchmark; fs_tools adds its own
+    write_tools = set(world_changing_tools())
 
     # The plan was rendered for the model to read and then never looked at
     # again. It is the only statement of intent the run has, so it is worth one
@@ -822,7 +826,7 @@ def _verify(llm, world, task_text):
         # email was clipped four words before "turn the same numbers into a
         # short deck", so the verifier passed runs that never built the deck
         # and reported the spreadsheet it DID build as unrequested.
-        cap = 200 if a["tool"] in (BASE_WRITE_TOOLS | EXTRA_WRITE_TOOLS) else 800
+        cap = 200 if a["tool"] in world_changing_tools() else 800
         result = str(a.get("result", ""))[:cap].replace("\n", " ")
         lines.append(f"- {a['tool']}({json.dumps(a['args'], ensure_ascii=False, default=str)[:200]}) "
                      f"-> {status}: {result}")
@@ -855,7 +859,7 @@ def _verify(llm, world, task_text):
             # wrote, which is the behaviour the rest of the harness is built to
             # produce. Flagging it would teach precisely the wrong lesson.
             said = str(obj.get("unrequested") or "")
-            writes = BASE_WRITE_TOOLS | EXTRA_WRITE_TOOLS
+            writes = world_changing_tools()
             obj["unrequested"] = ", ".join(sorted(
                 {a["tool"] for a in acts if a["tool"] in writes
                  and re.search(rf"\b{re.escape(a['tool'])}\b", said)}))

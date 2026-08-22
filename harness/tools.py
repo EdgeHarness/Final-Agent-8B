@@ -1,7 +1,7 @@
 """Tool registry shared by BOTH conditions (raw and harness).
 
-Each tool: name, signature params {name: (type_desc, required)}, description,
-an example call (shown only in the harness prompt), and an executor.
+Each tool: name, effect class, signature params {name: (type_desc, required)},
+description, an example call (shown only in the harness prompt), and an executor.
 Tool behavior and error messages are identical across conditions - the
 experiment varies only the scaffolding around the model.
 """
@@ -17,20 +17,48 @@ def _fmt(result):
     return json.dumps(result, ensure_ascii=False, default=str)
 
 
+# Effect classes. The vocabulary is from the system-boundary argument in the
+# Cordis paper (section 6.1): an operation reaching outside the boundary
+# acquires a revertible record and then EMITS, and the emission is what cannot
+# be taken back. So the split the loop cares about is not "read vs write", it
+# is whether an inverse exists at all.
+#
+#   read                    - observes, changes nothing
+#   revertible_write        - changes state this system owns and can restore
+#   withheld_emission       - composes something a human must release (MCP draft
+#                             mode: the model writes, a person sends)
+#   unrecoverable_emission  - data leaves to another party; no inverse exists
+#
+# Deliberately NOT a class: "compensable" (an emission with an application
+# supplied undo, e.g. delete the file you created, refund the charge). Draft
+# mode covers every emission our connectors currently reach, and one more class
+# with one speculative user is the abstraction not to build. Revive it the day
+# a connector offers a real undo we would actually call.
+EFFECTS = ("read", "revertible_write", "withheld_emission", "unrecoverable_emission")
+
+# Everything that is not a read changes the world. This is the predicate the
+# loop used to spell as a literal set of nine office tool names, which meant a
+# new domain's writes were invisible to the repeat check, the date guard and
+# the unrequested report until somebody remembered to edit that set.
+WORLD_CHANGING = frozenset(EFFECTS) - {"read"}
+
 TOOLS = {
     "list_emails": {
+        "effect": "read",
         "desc": "List all emails in the inbox (id, from, date, subject). Newest first.",
         "params": {},
         "example": {"tool": "list_emails", "args": {}},
         "run": lambda w, m, a: w.list_emails(),
     },
     "read_email": {
+        "effect": "read",
         "desc": "Read the full body of one email by its id.",
         "params": {"id": ("string, an email id like 'e3'", True)},
         "example": {"tool": "read_email", "args": {"id": "e2"}},
         "run": lambda w, m, a: w.read_email(a["id"]),
     },
     "send_email": {
+        "effect": "unrecoverable_emission",
         "desc": "Send an email.",
         "params": {"to": ("string, recipient address", True),
                    "subject": ("string", True),
@@ -40,12 +68,14 @@ TOOLS = {
         "run": lambda w, m, a: w.send_email(a["to"], a.get("subject", ""), a.get("body", "")),
     },
     "list_events": {
+        "effect": "read",
         "desc": "List calendar events, optionally only for one date.",
         "params": {"date": ("string YYYY-MM-DD, optional - omit for all events", False)},
         "example": {"tool": "list_events", "args": {"date": "2026-07-22"}},
         "run": lambda w, m, a: w.list_events(a.get("date")),
     },
     "add_event": {
+        "effect": "revertible_write",
         "desc": "Add an event to the calendar.",
         "params": {"title": ("string", True),
                    "date": ("string YYYY-MM-DD", True),
@@ -60,6 +90,7 @@ TOOLS = {
                                            a.get("attendees"), a.get("location")),
     },
     "update_event": {
+        "effect": "revertible_write",
         "desc": "Change an existing calendar event: move it, rename it, or change who is "
                 "coming. Give only the fields you are changing. Use this to move or "
                 "reschedule a meeting - adding a new event leaves the old one in place.",
@@ -77,12 +108,14 @@ TOOLS = {
                                               a.get("location"), a.get("attendees")),
     },
     "cancel_event": {
+        "effect": "revertible_write",
         "desc": "Remove an event from the calendar.",
         "params": {"id": ("string, an event id like 'c2' from list_events", True)},
         "example": {"tool": "cancel_event", "args": {"id": "c4"}},
         "run": lambda w, m, a: w.cancel_event(a["id"]),
     },
     "send_message": {
+        "effect": "unrecoverable_emission",
         "desc": "Send a chat/instant message to a person.",
         "params": {"to": ("string, contact name", True),
                    "text": ("string, the message", True)},
@@ -90,6 +123,7 @@ TOOLS = {
         "run": lambda w, m, a: w.send_message(a["to"], a["text"]),
     },
     "set_reminder": {
+        "effect": "revertible_write",
         "desc": "Set a reminder for yourself at a specific date and time.",
         "params": {"text": ("string, what to be reminded of", True),
                    "date": ("string YYYY-MM-DD", True),
@@ -99,6 +133,7 @@ TOOLS = {
         "run": lambda w, m, a: w.set_reminder(a["text"], a["date"], a["time"]),
     },
     "create_presentation": {
+        "effect": "revertible_write",
         "desc": "Create a real .pptx PowerPoint file. Each slide is an object with a "
                 "'title' and an optional 'bullets' list. A first slide without bullets "
                 "becomes a title slide.",
@@ -111,6 +146,7 @@ TOOLS = {
         "run": lambda w, m, a: office.create_presentation(w.files_dir, a["filename"], a["slides"]),
     },
     "create_spreadsheet": {
+        "effect": "revertible_write",
         "desc": "Create a real .xlsx Excel file from a list of rows (first row is usually "
                 "headers). A cell string starting with '=' becomes a formula.",
         "params": {"filename": ("string ending in .xlsx", True),
@@ -124,12 +160,14 @@ TOOLS = {
                                                          a.get("sheet_name")),
     },
     "read_spreadsheet": {
+        "effect": "read",
         "desc": "Read back the cell contents of an existing .xlsx file.",
         "params": {"filename": ("string ending in .xlsx", True)},
         "example": {"tool": "read_spreadsheet", "args": {"filename": "costs.xlsx"}},
         "run": lambda w, m, a: office.read_spreadsheet(w.files_dir, a["filename"]),
     },
     "think": {
+        "effect": "read",
         "desc": "Think out loud about the task. Use this to reason before acting. "
                 "Has no external effect.",
         "params": {"thought": ("string", True)},
@@ -137,6 +175,7 @@ TOOLS = {
         "run": lambda w, m, a: "Noted. Continue with your next action.",
     },
     "save_memory": {
+        "effect": "revertible_write",
         "desc": "Save a lasting preference or fact about the user and the people they "
                 "work with, so it persists across future tasks. Only things that stay "
                 "true: who someone is, how the user likes to work. NEVER the current "
@@ -147,18 +186,51 @@ TOOLS = {
         "run": lambda w, m, a: m.save(a["fact"]),
     },
     "recall_memories": {
+        "effect": "read",
         "desc": "Search long-term memory for saved facts relevant to a query.",
         "params": {"query": ("string", True)},
         "example": {"tool": "recall_memories", "args": {"query": "meeting preferences"}},
         "run": lambda w, m, a: (m.search(a["query"], k=5) or "no matching memories"),
     },
     "done": {
+        "effect": "read",
         "desc": "Call this exactly once, when the entire task is finished, with a short summary.",
         "params": {"summary": ("string", True)},
         "example": {"tool": "done", "args": {"summary": "Booked the meeting and messaged Sam."}},
         "run": None,  # handled by the agent loop
     },
 }
+
+
+# Fail at import, not at the first call that needed the answer. A tool with no
+# effect class would silently read as a read, which is the one wrong default:
+# absence of a declaration is not permission to change the world.
+for _name, _spec in TOOLS.items():
+    if _spec.get("effect") not in EFFECTS:
+        raise ValueError(f"tool {_name!r} declares effect {_spec.get('effect')!r}; "
+                         f"must be one of {', '.join(EFFECTS)}")
+del _name, _spec
+
+
+def effect_of(name, registry=None):
+    """The effect class of one tool. Unknown tools are treated as world-changing,
+    for the same reason the check above exists."""
+    spec = (registry or TOOLS).get(name)
+    return spec.get("effect", "unrecoverable_emission") if spec else "unrecoverable_emission"
+
+
+def write_tool_names(registry=None):
+    """Every registered tool that changes the world. Derived, never a literal:
+    a domain that registers its own tools gets the guards for free."""
+    reg = registry if registry is not None else TOOLS
+    return frozenset(n for n, s in reg.items()
+                     if s.get("effect", "unrecoverable_emission") in WORLD_CHANGING)
+
+
+def read_tool_names(registry=None):
+    """Every registered tool that only observes."""
+    reg = registry if registry is not None else TOOLS
+    return frozenset(n for n, s in reg.items() if s.get("effect") == "read")
 
 
 def tool_docs(with_examples):

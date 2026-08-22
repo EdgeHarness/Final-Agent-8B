@@ -15,7 +15,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from harness import agent, fs_tools, office, profiles  # noqa: E402
+from harness import agent, fs_tools, office, profiles, tools  # noqa: E402
 from harness.memory import MemoryStore  # noqa: E402
 from harness.tools import TOOLS, execute, validate_call  # noqa: E402
 from harness.world import ToolError, World  # noqa: E402
@@ -252,10 +252,75 @@ class TestCalendarEditing(unittest.TestCase):
         self.assertEqual(new["id"], "c8")
 
     def test_both_editors_count_as_writes_for_the_loop(self):
+        """Was: grep agent.py for the two names, back when the write set was a
+        literal there. The set is derived from declared effect classes now, so
+        the intent is assertable directly instead of by proxy."""
         from harness import agent as a
-        src = open(a.__file__).read()
-        self.assertIn('"update_event"', src)
-        self.assertIn('"cancel_event"', src)
+        self.assertIn("update_event", a.world_changing_tools())
+        self.assertIn("cancel_event", a.world_changing_tools())
+
+
+
+# ------------------------------------------------------------------ effects ---
+
+class TestEffectClasses(unittest.TestCase):
+    """The write set used to be a literal frozenset of nine office tool names in
+    agent.py. It is derived from a per-tool effect declaration now, so a domain
+    that registers its own tools gets the date guard, the unplanned-write nudge,
+    the repeat check and the unrequested report without editing the loop."""
+
+    def test_every_registered_tool_declares_a_valid_effect(self):
+        for name, spec in tools.TOOLS.items():
+            self.assertIn(spec.get("effect"), tools.EFFECTS, name)
+
+    def test_the_derived_write_set_is_the_nine_it_replaced(self):
+        """Proof the refactor changed nothing for the graded benchmark."""
+        self.assertEqual(
+            set(tools.write_tool_names()),
+            {"send_email", "add_event", "update_event", "cancel_event", "send_message",
+             "set_reminder", "create_presentation", "create_spreadsheet", "save_memory"})
+
+    def test_reads_and_writes_partition_the_registry(self):
+        reads, writes = tools.read_tool_names(), tools.write_tool_names()
+        self.assertEqual(reads & writes, frozenset())
+        self.assertEqual(reads | writes, frozenset(tools.TOOLS))
+
+    def test_an_undeclared_tool_counts_as_world_changing(self):
+        """The one wrong default is to read as a read. An MCP server or a domain
+        pack that registers a tool without saying what it does gets treated as
+        the most dangerous thing it could be, not the safest."""
+        reg = {"mystery": {"desc": "", "params": {}, "example": {}, "run": None}}
+        self.assertEqual(tools.effect_of("mystery", reg), "unrecoverable_emission")
+        self.assertEqual(set(tools.write_tool_names(reg)), {"mystery"})
+
+    def test_an_unknown_tool_name_counts_as_world_changing(self):
+        self.assertEqual(tools.effect_of("no_such_tool", {}), "unrecoverable_emission")
+
+    def test_emissions_are_the_tools_that_reach_another_party(self):
+        """The class split exists for confirmation policy: an emission has no
+        inverse, a revertible_write does."""
+        self.assertEqual(tools.effect_of("send_email"), "unrecoverable_emission")
+        self.assertEqual(tools.effect_of("send_message"), "unrecoverable_emission")
+        self.assertEqual(tools.effect_of("create_spreadsheet"), "revertible_write")
+        self.assertEqual(tools.effect_of("read_spreadsheet"), "read")
+
+
+    def test_mcp_tools_declare_their_own_effect_class(self):
+        """Real-account tools reach a live mailbox, so the classification cannot
+        be left to the undeclared default even though that default is safe."""
+        from harness import mcp_bridge as mb
+        self.assertEqual(mb._effect_class("list_messages", False), "read")
+        self.assertEqual(mb._effect_class("create_draft", True), "withheld_emission")
+        self.assertEqual(mb._effect_class("send_message", True), "unrecoverable_emission")
+        self.assertEqual(mb._effect_class("send_draft", True), "unrecoverable_emission")
+
+    def test_an_unrecognised_real_account_write_is_called_an_emission(self):
+        """From a name alone we cannot tell whether a write reaches another
+        party, and a calendar invite does. Guessing revertible_write would be
+        guessing in the direction that costs something."""
+        from harness import mcp_bridge as mb
+        self.assertEqual(mb._effect_class("create_event", True), "unrecoverable_emission")
+        self.assertEqual(mb._effect_class("update_label", True), "unrecoverable_emission")
 
 
 # ------------------------------------------------------------------- memory ---
