@@ -188,3 +188,28 @@ Every defect above was found by running the app and watching the screen, or by
 grepping for a name. **None of them were found by reading the code that
 contained them.** The suite is fast on purpose so this stays cheap; it is not a
 substitute for the two minutes it takes to open the UI and press Run.
+
+## Omitting a declaration failed safe; misspelling it failed open
+
+**The rule.** A default that fails safe protects the case where a field is
+**missing**. It does nothing for the case where the field is **present and
+wrong**, and those are different failures.
+
+`effect_of` returned `spec.get("effect", "unrecoverable_emission")`. A tool
+that declared no effect got the safe default and was guarded. A tool that
+declared `revertable_write`, one letter off, had that string returned verbatim;
+it was not in `WORLD_CHANGING`, so the tool read as a harmless read and skipped
+every guard. The safest possible default sat right next to the hole.
+
+Import-time registration validated the value against the four classes. The
+runtime path, `register()`, which is what `mcp_bridge` and `fs_tools` use, did
+not. One of two doors was locked.
+
+The fix is at both choke points, because a typo can arrive through either:
+reject an unrecognised class where tools are registered, and normalise an
+unrecognised class back to world-changing where it is read. Validation at the
+write path alone would still trust a registry assembled some other way.
+
+**Check the negative direction.** The test that mattered was not "does a valid
+effect work" but "what does an INVALID one do", and the answer was the one
+direction that costs something.

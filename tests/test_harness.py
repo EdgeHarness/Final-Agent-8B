@@ -1343,6 +1343,68 @@ def _reachable_after_clone():
     return reachable
 
 
+class TestEffectDeclarationIsNotTrusted(unittest.TestCase):
+    """A misdeclared effect used to fail OPEN.
+
+    Omitting the effect key already defaulted to unrecoverable_emission, so a
+    forgotten declaration was guarded. A MISSPELLED one was not: it was returned
+    verbatim, fell outside WORLD_CHANGING, and the tool read as a harmless read.
+    Import-time registration was checked; register() was the runtime path and
+    was not."""
+
+    def test_misspelled_effect_is_rejected_at_registration(self):
+        with self.assertRaises(ValueError) as caught:
+            tools.register('sneaky', {'effect': 'revertable_write', 'desc': 'typo'})
+        self.assertIn('revertable_write', str(caught.exception))
+        self.assertNotIn('sneaky', tools.TOOLS)
+
+    def test_registration_is_atomic_when_one_spec_is_bad(self):
+        """Nothing is installed when any spec in the batch is rejected."""
+        with self.assertRaises(ValueError):
+            tools.edit_registry({'ok_one': {'effect': 'read', 'desc': 'a'},
+                                 'bad_one': {'effect': 'nonsense', 'desc': 'b'}})
+        self.assertNotIn('ok_one', tools.TOOLS)
+        self.assertNotIn('bad_one', tools.TOOLS)
+
+    def test_unrecognised_effect_reads_as_world_changing(self):
+        """Defence in depth for a registry built without going through
+        edit_registry: the READ path must not trust the string either."""
+        reg = {'odd': {'effect': 'revertable_write', 'desc': 'typo'}}
+        self.assertEqual(tools.effect_of('odd', reg), 'unrecoverable_emission')
+        self.assertIn('odd', tools.write_tool_names(reg))
+
+    def test_missing_effect_still_reads_as_world_changing(self):
+        reg = {'bare': {'desc': 'no effect key'}}
+        self.assertEqual(tools.effect_of('bare', reg), 'unrecoverable_emission')
+        self.assertIn('bare', tools.write_tool_names(reg))
+
+
+class TestDisposerIndependence(unittest.TestCase):
+    """The precondition edit_registry documents, encoded.
+
+    Disjoint key sets are independent and may be undone in any order.
+    Overlapping ones are not, and the docstring says so rather than pretending
+    otherwise."""
+
+    def test_disjoint_edits_undo_correctly_in_either_order(self):
+        reg = {}
+        a = tools.edit_registry({'x': {'effect': 'read', 'desc': 'x'}}, reg)
+        b = tools.edit_registry({'y': {'effect': 'read', 'desc': 'y'}}, reg)
+        a()                       # out of order on purpose
+        self.assertEqual(set(reg), {'y'})
+        b()
+        self.assertEqual(reg, {})
+
+    def test_overlapping_edits_are_order_dependent(self):
+        """Not a bug being fixed, a precondition being demonstrated: undoing the
+        OUTER edit first restores the value the inner one had shadowed."""
+        reg = {'shared': {'effect': 'read', 'desc': 'original'}}
+        outer = tools.edit_registry({'shared': {'effect': 'read', 'desc': 'outer'}}, reg)
+        tools.edit_registry({'shared': {'effect': 'read', 'desc': 'inner'}}, reg)
+        outer()
+        self.assertEqual(reg['shared']['desc'], 'original')
+
+
 class TestDocumentLinks(unittest.TestCase):
     """Nothing checked that a document link resolved, so a rename could break
     every reference to what it renamed and nothing would say so.

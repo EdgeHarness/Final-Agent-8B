@@ -286,14 +286,26 @@ def edit_registry(changes, registry=None):
     the previous state. None removes. The undo is idempotent and restores what
     was shadowed, not merely what was added.
 
-    PRECONDITION, and it is not theoretical: the disposers are only sound while
-    nothing else moves the registry between the moment one is built and the
-    moment it runs. LIFO in a single thread satisfies that. Two CONCURRENT runs
-    both touching the registry would interleave their inverses and the teardown
-    would restore the wrong state. RunConfig makes parallel runs look available;
-    they are safe only while every one of them leaves the registry alone.
+    PRECONDITION, and it is not theoretical. An earlier version of this note
+    said the disposers are sound only while nothing else moves the registry at
+    all. That is true but stronger than necessary. The actual condition is
+    disjointness: two edits are independent when their KEY SETS do not overlap,
+    because dict writes to different keys commute and neither edit disturbs the
+    `before` the other captured. Overlapping keys are what breaks it, and then
+    the later undo restores the earlier edit's value.
+
+    LIFO in a single thread is sound whatever the keys. Two CONCURRENT runs are
+    sound only if they touch disjoint tools; if they share one, the teardown
+    restores the wrong spec. RunConfig makes parallel runs look available, and
+    this is the condition they owe.
     """
     reg = registry if registry is not None else TOOLS
+    for name, spec in changes.items():
+        if spec is not None and "effect" in spec and spec["effect"] not in EFFECTS:
+            raise ValueError(
+                f"tool {name!r} declares effect {spec['effect']!r}, which must be "
+                f"one of {', '.join(EFFECTS)}. Import-time registration is checked "
+                f"the same way; this is the runtime path, which was not.")
     before = {n: reg.get(n, _ABSENT) for n in changes}
     for name, spec in changes.items():
         if spec is None:
@@ -345,19 +357,30 @@ def file_writing_tools(registry=None):
     return frozenset(n for n, s in reg.items() if s.get("writes_file"))
 
 
+def _effect(spec):
+    """The effect class a spec declares, normalised.
+
+    An UNRECOGNISED value is treated as world-changing, not trusted. Omitting
+    the key already failed safe, but a misspelling did not: 'revertable_write'
+    was returned verbatim, fell outside WORLD_CHANGING, and so read as harmless
+    and skipped every guard. The one direction a typo must not fail in."""
+    if not spec:
+        return "unrecoverable_emission"
+    declared = spec.get("effect", "unrecoverable_emission")
+    return declared if declared in EFFECTS else "unrecoverable_emission"
+
+
 def effect_of(name, registry=None):
     """The effect class of one tool. Unknown tools are treated as world-changing,
     for the same reason the check above exists."""
-    spec = (registry or TOOLS).get(name)
-    return spec.get("effect", "unrecoverable_emission") if spec else "unrecoverable_emission"
+    return _effect((registry or TOOLS).get(name))
 
 
 def write_tool_names(registry=None):
     """Every registered tool that changes the world. Derived, never a literal:
     a domain that registers its own tools gets the guards for free."""
     reg = registry if registry is not None else TOOLS
-    return frozenset(n for n, s in reg.items()
-                     if s.get("effect", "unrecoverable_emission") in WORLD_CHANGING)
+    return frozenset(n for n, s in reg.items() if _effect(s) in WORLD_CHANGING)
 
 
 def read_tool_names(registry=None):
