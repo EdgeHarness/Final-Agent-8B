@@ -317,7 +317,8 @@ Respond with a single JSON object of the form {{"tool": "<tool name>", "args": {
 Call the done tool when the task is finished."""
 
 
-def run_raw(llm, world, mem, task_text):
+def run_raw(llm, world, mem, task_text, cfg=None):
+    cfg = cfg or RunConfig()
     ep = Episode()
     system = RAW_SYSTEM.format(today=SIM_TODAY_HUMAN, docs=tool_docs(with_examples=False))
     messages = [{"role": "system", "content": system},
@@ -326,7 +327,7 @@ def run_raw(llm, world, mem, task_text):
     ep.note("task", task_text)
 
     try:
-        _raw_loop(llm, world, mem, ep, messages)
+        _raw_loop(llm, world, mem, ep, messages, cfg)
     finally:
         # Snapshot no matter how the loop ended. Without this, a crash mid-run
         # (ollama dying, a network error) lost every world mutation: the UI had
@@ -337,8 +338,8 @@ def run_raw(llm, world, mem, task_text):
     return ep
 
 
-def _raw_loop(llm, world, mem, ep, messages):
-    while llm.calls < MAX_CALLS:
+def _raw_loop(llm, world, mem, ep, messages, cfg):
+    while llm.calls < cfg.max_calls:
         reply = llm.chat(messages, force_json=False)
         messages.append({"role": "assistant", "content": reply})
         ep.note("model", reply)
@@ -391,6 +392,47 @@ EXTRA_RULES = ""
 # Extra world-changing tool names, for the loop-breaking check. Empty for the
 # benchmark; the on-device agents add the real-filesystem writers.
 EXTRA_WRITE_TOOLS = set()
+
+
+class RunConfig:
+    """The knobs that belong to ONE run, gathered so a run can be handed them
+    instead of reading them off the module.
+
+    Everything here used to be a module global, which meant one process could
+    hold exactly one configuration: no two runs at once, no in-process A/B, and
+    every test that touched the loop had to save and restore. The evaluation rig
+    is the concrete customer - ablating a guard meant patching a module list and
+    putting it back, and its arms have to run in sequence for no better reason.
+
+    Deliberately NOT here: the simulated clock, the tool registry, and the
+    observation hooks. Those are genuinely process-level (one clock, one
+    registry, one UI listening), and pretending otherwise would be a bigger lie
+    than the one being fixed. Threading them is a separate change with its own
+    reason to happen.
+    """
+
+    __slots__ = ("max_calls", "profile", "extra_rules", "extra_write_tools", "guards")
+
+    def __init__(self, max_calls=None, profile=None, extra_rules=None,
+                 extra_write_tools=None, guards=None):
+        self.max_calls = MAX_CALLS if max_calls is None else max_calls
+        self.profile = PROFILE if profile is None else profile
+        self.extra_rules = EXTRA_RULES if extra_rules is None else extra_rules
+        self.extra_write_tools = (set(EXTRA_WRITE_TOOLS) if extra_write_tools is None
+                                  else set(extra_write_tools))
+        self.guards = list(GUARDS) if guards is None else list(guards)
+
+    def without_guard(self, name):
+        """A copy with one cross-check removed. This is the ablation the rig
+        needs, and it no longer requires patching anything."""
+        return RunConfig(self.max_calls, self.profile, self.extra_rules,
+                         self.extra_write_tools,
+                         [g for g in self.guards if g[0] != name])
+
+    def __repr__(self):
+        return (f"RunConfig(max_calls={self.max_calls}, "
+                f"profile={getattr(self.profile, 'name', '?')}, "
+                f"guards={[n for n, _ in self.guards]})")
 
 PLAN_PROMPT = ('Which tools will you need to call to complete this task, in order? '
                'Reply with one JSON object: {"steps": [{"tool": "<tool_name>", "what": "<5 words>"}, ...]}. '
@@ -479,7 +521,7 @@ def plan_name(name):
     return close[0] if close else None
 
 
-def plan_step(llm, messages, ep):
+def plan_step(llm, messages, ep, cfg=None):
     """Ask for a tool-grounded plan; return it as short text (or ''). A tool
     name that is not a near miss for any real tool is dropped - free prose
     never enters the context."""
@@ -487,7 +529,7 @@ def plan_step(llm, messages, ep):
     obj, _ = parse_lenient(reply)
     steps, repaired = [], []
     if isinstance(obj, dict) and isinstance(obj.get("steps"), list):
-        for s in obj["steps"][:PROFILE.plan_max_steps]:
+        for s in obj["steps"][:(cfg or RunConfig()).profile.plan_max_steps]:
             if not isinstance(s, dict):
                 continue
             asked = s.get("tool")
@@ -528,7 +570,9 @@ class GuardState:
     One object rather than a dozen closure variables, so a guard is an ordinary
     function that can be called from a test with a hand-built state."""
 
-    def __init__(self, llm, world, ep, messages, task_text, write_tools, plan):
+    def __init__(self, llm, world, ep, messages, task_text, write_tools, plan,
+                 cfg=None):
+        self.cfg = cfg or RunConfig()
         self.llm, self.world, self.ep = llm, world, ep
         self.messages, self.task_text = messages, task_text
         self.write_tools = write_tools
@@ -610,7 +654,7 @@ def guard_unplanned_write(g):
         ask = REPLAN_PROMPT.format(task=g.task_text, plan=g.plan or "(none)")
         g.ep.note("prompt", ask)
         g.messages.append({"role": "user", "content": ask})
-        g.plan = plan_step(g.llm, g.messages, g.ep) or g.plan
+        g.plan = plan_step(g.llm, g.messages, g.ep, g.cfg) or g.plan
         g.messages.pop()
         g.planned = planned_tools(g.plan)
         g.planned_set = set(g.planned)
@@ -683,20 +727,23 @@ def run_guards(g, guards=None):
     Guards after the first are not consulted and their side effects do not
     happen, which is why an expensive one (the replan) sits behind a cheap
     predicate rather than in front of it."""
-    for name, check in (GUARDS if guards is None else guards):
+    if guards is None:
+        guards = g.cfg.guards if getattr(g, "cfg", None) else GUARDS
+    for name, check in guards:
         message = check(g)
         if message:
             return name, message
     return None
 
 
-def run_harness(llm, world, mem, task_text, history=""):
+def run_harness(llm, world, mem, task_text, history="", cfg=None):
     """history: prior conversation turns as a text block (harness/chat.py
     prompt_block). Empty by default, so a run with no conversation behind it
     builds byte-identical context to before — the same opt-in shape as
     EXTRA_RULES."""
+    cfg = cfg or RunConfig()
     ep = Episode()
-    memories = mem.search(task_text, k=PROFILE.memory_k)  # only matches, no recency fallback
+    memories = mem.search(task_text, k=cfg.profile.memory_k)  # only matches, no recency fallback
     memory_block = ""
     if memories:
         # "apply them when relevant" read as instruction, and a memory outranked
@@ -711,7 +758,7 @@ def run_harness(llm, world, mem, task_text, history=""):
     system = HARNESS_SYSTEM.format(today=SIM_TODAY_HUMAN, shape=SHAPE,
                                    docs=tool_docs(with_examples=True),
                                    memory_block=memory_block,
-                                   extra_rules=EXTRA_RULES + (history or ""))
+                                   extra_rules=cfg.extra_rules + (history or ""))
     messages = [{"role": "system", "content": system}]
     ep.note("system", system)
     ep.note("task", task_text)
@@ -719,14 +766,14 @@ def run_harness(llm, world, mem, task_text, history=""):
     # Planning is opt-out per profile: a small model that can't follow a plan
     # should not spend a call producing one.
     plan = ""
-    if PROFILE.plan:
+    if cfg.profile.plan:
         ask = f"TASK: {task_text}\n\n{PLAN_PROMPT}"
         # Model-visible means logged, including the request that is popped from
         # the context straight afterwards. Being short-lived is not a reason to
         # be invisible: it still shaped the plan the whole run then follows.
         ep.note("prompt", ask)
         messages.append({"role": "user", "content": ask})
-        plan = plan_step(llm, messages, ep)
+        plan = plan_step(llm, messages, ep, cfg)
         messages.pop()  # the plan request leaves the context; the plan re-enters as guidance
     act = f"TASK: {task_text}\n\n"
     if plan:
@@ -740,12 +787,12 @@ def run_harness(llm, world, mem, task_text, history=""):
     world_version = 0    # bumped on successful writes; a call's repeat budget is
                          # only spent while the world is unchanged, and resets
                          # the moment anything writes
-    write_tools = set(world_changing_tools())
+    write_tools = set(tools.write_tool_names() | cfg.extra_write_tools)
 
     # All guard state lives on one object so a guard is an ordinary function a
     # test can call directly. The reasoning behind each field is on the guard
     # that uses it.
-    g = GuardState(llm, world, ep, messages, task_text, write_tools, plan)
+    g = GuardState(llm, world, ep, messages, task_text, write_tools, plan, cfg)
     echo_questioned = False
     last_reply = None
     think_streak = 0
@@ -767,8 +814,8 @@ def run_harness(llm, world, mem, task_text, history=""):
     # only ran on clean exit. The UI had already told the user a write
     # succeeded; after a restart it had never happened.
     try:
-        while llm.calls < MAX_CALLS:
-            reply = llm.chat(messages, force_json=True, num_predict=PROFILE.num_predict,
+        while llm.calls < cfg.max_calls:
+            reply = llm.chat(messages, force_json=True, num_predict=cfg.profile.num_predict,
                              role="driver")
             messages.append({"role": "assistant", "content": reply})
             ep.note("model", reply)
@@ -784,7 +831,7 @@ def run_harness(llm, world, mem, task_text, history=""):
                 args = {k: v for k, v in obj.items() if k not in ("tool", "name", "thought", "args")}
 
             if name == "done":
-                if verify_rounds < PROFILE.verify_rounds and llm.calls < MAX_CALLS:
+                if verify_rounds < cfg.profile.verify_rounds and llm.calls < cfg.max_calls:
                     verify_rounds += 1
                     verdict = _verify(llm, world, task_text, ep)
                     ep.note("verify", json.dumps(verdict, ensure_ascii=False))
@@ -853,7 +900,8 @@ def run_harness(llm, world, mem, task_text, history=""):
             last_version, repeats, last_ok = seen_calls.get(sig, (None, 0, True))
             if last_version != world_version:
                 repeats = 0
-            limit = PROFILE.repeat_limit_write if name in write_tools else PROFILE.repeat_limit
+            limit = (cfg.profile.repeat_limit_write if name in write_tools
+                     else cfg.profile.repeat_limit)
             if not last_ok:
                 # The repeat budget exists so a model can look at something twice -
                 # read the email, think, read it again. That reasoning only holds
@@ -863,7 +911,7 @@ def run_harness(llm, world, mem, task_text, history=""):
                 # spent three of its twenty calls on read_email("c3"), a calendar id
                 # it had mistaken for an email id.
                 limit = 1
-            if PROFILE.loop_break and name != "think" and repeats >= limit:
+            if cfg.profile.loop_break and name != "think" and repeats >= limit:
                 # Budget spent against an unchanged world: re-running it cannot
                 # return anything new. If this is a verbatim repeat of the previous
                 # exchange, delete the older copy (repetition in context is an
@@ -914,7 +962,7 @@ def run_harness(llm, world, mem, task_text, history=""):
             if not ok:
                 ep.tool_errors += 1
             obs = _obs(obs)
-            if think_streak >= PROFILE.think_streak_cap:
+            if think_streak >= cfg.profile.think_streak_cap:
                 obs += " NOTE: stop thinking and take a concrete action now."
             messages.append({"role": "user", "content": f"OBSERVATION: {obs}"})
             ep.note("observation", obs)

@@ -19,6 +19,8 @@ from harness import agent, fs_tools, office, profiles, tools  # noqa: E402
 from harness.memory import MemoryStore  # noqa: E402
 from harness.tools import TOOLS, execute, validate_call  # noqa: E402
 from harness.world import ToolError, World  # noqa: E402
+from bench import run as bench_run  # noqa: E402
+from bench import tasks as bench_tasks  # noqa: E402
 
 
 # ------------------------------------------------------------------ parsing ---
@@ -925,6 +927,129 @@ class TestRevertibleRegistration(unittest.TestCase):
         return d.name
 
 
+
+# ------------------------------------------------------------------ bench ---
+
+class TestBenchGraders(unittest.TestCase):
+    """A grader reads the FINAL WORLD, never the transcript: the transcript is
+    what the model claims it did, the world is what happened, and every failure
+    this harness exists to catch is a case where those disagreed.
+
+    Each grader is checked BOTH ways. A grader that can never pass looks
+    exactly like a real result, which is the same trap as an invariant matcher
+    that lies toward "all clear"."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.w = World(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_read_only_passes_on_an_untouched_world(self):
+        self.assertTrue(bench_tasks._check_read_only(self.w)[0])
+
+    def test_read_only_catches_each_kind_of_side_effect(self):
+        self.w.send_message("sam", "hi")
+        ok, why = bench_tasks._check_read_only(self.w)
+        self.assertFalse(ok)
+        self.assertIn("message", why)
+
+    def test_read_only_catches_a_calendar_change(self):
+        self.w.add_event("X", "2026-07-23", "10:00", "11:00")
+        self.assertFalse(bench_tasks._check_read_only(self.w)[0])
+
+    def test_receipts_passes_only_on_the_real_amounts(self):
+        office.create_spreadsheet(self.w.files_dir, "r.xlsx",
+                                  [["Vendor", "Amount"], ["CloudHost", "230.00"],
+                                   ["OfficeMax", "87.50"], ["Delta", "412.30"]])
+        self.assertTrue(bench_tasks._check_receipts_sheet(self.w)[0])
+
+    def test_receipts_catches_invented_numbers(self):
+        """The failure the read-before-write guard exists for: a plausible
+        sheet full of numbers that are not the ones in the inbox."""
+        office.create_spreadsheet(self.w.files_dir, "r.xlsx",
+                                  [["Item", "Cost"], ["A", 100], ["B", 200]])
+        ok, why = bench_tasks._check_receipts_sheet(self.w)
+        self.assertFalse(ok)
+        self.assertIn("invented", why)
+
+    def test_receipts_distinguishes_nothing_written_from_wrong_numbers(self):
+        """The two failures are not the same and the table must not merge
+        them: raw wrote nothing, the harness wrote the wrong thing."""
+        self.assertIn("no spreadsheet", bench_tasks._check_receipts_sheet(self.w)[1])
+
+    def test_deep_work_passes_on_thursday_and_fails_on_any_other_day(self):
+        self.w.add_event("Deep work", "2026-07-23", "14:00", "15:00")
+        self.assertTrue(bench_tasks._check_deep_work(self.w)[0])
+        w2 = World(tempfile.mkdtemp())
+        w2.add_event("Deep work", "2026-07-20", "14:00", "15:00")
+        ok, why = bench_tasks._check_deep_work(w2)
+        self.assertFalse(ok)
+        self.assertIn("2026-07-20", why)
+
+    def test_message_jordan_needs_jordan_specifically(self):
+        self.w.send_message("sam", "the list")
+        self.assertFalse(bench_tasks._check_message_jordan(self.w)[0])
+        self.w.send_message("jordan", "the list")
+        self.assertTrue(bench_tasks._check_message_jordan(self.w)[0])
+
+    def test_an_ablation_arm_exists_for_every_registered_guard(self):
+        """The rig's whole purpose. If a guard has no arm it cannot be
+        measured, and a guard nobody can measure is a guard nobody can
+        justify keeping."""
+        arms = bench_run.arms_for(None)
+        for name, _ in agent.GUARDS:
+            self.assertIn(f"harness-no-{name}", arms)
+        self.assertIn("raw", arms)
+        self.assertIn("harness", arms)
+
+    def test_an_arm_is_a_value_and_changes_nothing_globally(self):
+        """Replaces test_dropping_a_guard_is_undone_afterwards, which asserted
+        that bench_run._guards_without patched agent.GUARDS and restored it.
+        That function is gone: an arm is a RunConfig now, so there is nothing
+        to restore and the old test was asserting the mechanism rather than
+        the property."""
+        before = list(agent.GUARDS)
+        cfg = bench_run.config_for("harness-no-wrong_date", 12, agent.PROFILE)
+        self.assertNotIn("wrong_date", [n for n, _ in cfg.guards])
+        self.assertEqual(agent.GUARDS, before, "the module list must be untouched")
+
+    def test_two_arms_can_exist_at_the_same_time(self):
+        """The point of threading the config. Before this, one process held one
+        configuration, so arms had to run in sequence."""
+        full = bench_run.config_for("harness", 12, agent.PROFILE)
+        ablated = bench_run.config_for("harness-no-read_before_write", 12, agent.PROFILE)
+        self.assertIn("read_before_write", [n for n, _ in full.guards])
+        self.assertNotIn("read_before_write", [n for n, _ in ablated.guards])
+        self.assertEqual(len(full.guards), len(ablated.guards) + 1)
+
+    def test_a_sweep_can_run_a_model_under_another_models_profile(self):
+        """Holding the model fixed and varying the profile is the only way to
+        measure the plan-dependent guards on a machine where the installed
+        model's own profile switches planning off."""
+        own = profiles.for_model("llama3.2:1b")
+        forced = profiles.for_model("llama3.1:8b")
+        self.assertFalse(own.plan)
+        self.assertTrue(forced.plan)
+
+    def test_the_read_before_write_guard_needs_a_read_in_the_plan(self):
+        """The rig's first finding, pinned so it cannot be forgotten: the guard
+        is conditional on the plan naming a read before its first write. A plan
+        that is one write step arms nothing, which is what a 1b produces."""
+        g = agent.GuardState(None, self.w, agent.Episode(), [],
+                             "build it", agent.world_changing_tools(),
+                             "1. create_spreadsheet - build it")
+        self.assertIsNone(g.first_read_planned)
+        g.name, g.args = "create_spreadsheet", {}
+        self.assertIsNone(agent.guard_read_before_write(g),
+                          "nothing in the plan to hold the model to")
+
+    def test_an_unknown_arm_is_refused_rather_than_silently_skipped(self):
+        with self.assertRaises(SystemExit):
+            bench_run.arms_for(["harness-no-nonsense"])
+
+
 # ------------------------------------------------------------------- memory ---
 
 class TestMemory(unittest.TestCase):
@@ -1504,6 +1629,49 @@ class TestLoop(unittest.TestCase):
         ep = agent.run_harness(llm, self.world, self.mem, "look at the inbox")
         text = "\n".join(n["content"] for n in ep.transcript if n["kind"] == "plan")
         self.assertIn("unusable plan reply", text)
+
+    def test_a_config_disarms_a_guard_for_one_run_only(self):
+        """The property the whole refactor exists for, through a real
+        run_harness rather than through the config object: the same process
+        runs one episode with the guard and one without, and neither leaks
+        into the other."""
+        plan = '{"steps": [{"tool": "list_emails", "what": "look"}, ' \
+               '{"tool": "create_spreadsheet", "what": "build"}]}'
+
+        def episode(cfg):
+            llm = _ScriptedLLM([plan, self.call("create_spreadsheet", filename="r.xlsx",
+                                                rows=[["Item", "Cost"], ["X", 1]])])
+            world = World(tempfile.mkdtemp())
+            return agent.run_harness(llm, world, self.mem, "spreadsheet of receipts",
+                                     cfg=cfg), llm
+
+        base = agent.RunConfig(max_calls=6,
+                               profile=profiles.replace(profiles.DEFAULT, plan=True,
+                                                        verify_rounds=0))
+        with_guard, _ = episode(base)
+        without, _ = episode(base.without_guard("read_before_write"))
+
+        fired = [n["content"] for n in with_guard.transcript if n["kind"] == "guard"]
+        silent = [n["content"] for n in without.transcript if n["kind"] == "guard"]
+        self.assertIn("read_before_write", fired)
+        self.assertNotIn("read_before_write", silent)
+
+    def test_the_module_globals_are_untouched_by_a_configured_run(self):
+        before = (agent.MAX_CALLS, agent.PROFILE, list(agent.GUARDS))
+        cfg = agent.RunConfig(max_calls=3,
+                              profile=profiles.replace(profiles.DEFAULT, plan=False,
+                                                       verify_rounds=0))
+        agent.run_harness(_ScriptedLLM([self.call("list_emails")]),
+                          self.world, self.mem, "look", cfg=cfg)
+        self.assertEqual((agent.MAX_CALLS, agent.PROFILE, list(agent.GUARDS)), before)
+
+    def test_the_configs_budget_is_what_actually_stops_the_run(self):
+        cfg = agent.RunConfig(max_calls=3,
+                              profile=profiles.replace(profiles.DEFAULT, plan=False,
+                                                       verify_rounds=0, loop_break=False))
+        llm = _ScriptedLLM([self.call("think", thought="x")])
+        agent.run_harness(llm, self.world, self.mem, "think about it", cfg=cfg)
+        self.assertEqual(llm.calls, 3)
 
     def test_a_guard_note_lands_immediately_before_the_message_it_produced(self):
         """The contract the web UI depends on: it holds the guard name from the
