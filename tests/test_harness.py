@@ -323,6 +323,213 @@ class TestEffectClasses(unittest.TestCase):
         self.assertEqual(mb._effect_class("update_label", True), "unrecoverable_emission")
 
 
+    def test_the_unread_file_guard_follows_the_registry_not_a_literal(self):
+        """The guard hardcoded create_spreadsheet, create_presentation,
+        read_spreadsheet and an .xlsx regex, so it was blind to every other
+        document type a domain might register."""
+        from harness import agent as a
+        self.assertEqual(set(tools.file_writing_tools()),
+                         {"create_spreadsheet", "create_presentation"})
+        self.assertEqual(tools.opener_for("q3_raw.xlsx"), "read_spreadsheet")
+        self.assertIsNone(tools.opener_for("notes.txt"))
+        self.assertEqual(a.filename_re().findall("the export is in q3_raw.xlsx today"),
+                         ["q3_raw.xlsx"])
+
+    def test_a_new_document_type_is_picked_up_without_touching_the_loop(self):
+        """The whole point of deriving it: register a reader and a writer for a
+        new extension and the guard covers them."""
+        from harness import agent as a
+        reg = dict(tools.TOOLS)
+        reg["read_report"] = {"effect": "read", "opens": (".pdf",),
+                              "desc": "", "params": {}, "example": {}, "run": None}
+        reg["make_report"] = {"effect": "revertible_write", "writes_file": True,
+                              "desc": "", "params": {}, "example": {}, "run": None}
+        self.assertEqual(tools.opener_for("q3.pdf", reg), "read_report")
+        self.assertIn("make_report", tools.file_writing_tools(reg))
+        saved = dict(tools.TOOLS)
+        try:
+            tools.TOOLS.clear(); tools.TOOLS.update(reg)
+            self.assertEqual(a.filename_re().findall("see q3.pdf and old.xlsx"),
+                             ["q3.pdf", "old.xlsx"])
+        finally:
+            tools.TOOLS.clear(); tools.TOOLS.update(saved)
+
+    def test_no_openable_extensions_means_no_filename_scan(self):
+        saved = dict(tools.TOOLS)
+        from harness import agent as a
+        try:
+            tools.TOOLS.clear()
+            self.assertIsNone(a.filename_re())
+        finally:
+            tools.TOOLS.clear(); tools.TOOLS.update(saved)
+
+
+
+# ------------------------------------------------------------------- guards ---
+
+class TestGuardRegistry(unittest.TestCase):
+    """The guards were inline `if ... continue` blocks in one 345-line
+    function: order was statement order, a domain could not add one, and none
+    could be exercised without scripting a whole run. Each is a named function
+    over a GuardState now, so these tests call them directly."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _state(self, plan="", task="do the thing"):
+        w = World(self.tmp.name)
+        return agent.GuardState(None, w, agent.Episode(), [], task,
+                                agent.world_changing_tools(), plan)
+
+    def test_every_guard_has_a_name_and_a_callable(self):
+        for name, check in agent.GUARDS:
+            self.assertTrue(name and callable(check), name)
+        self.assertEqual([n for n, _ in agent.GUARDS],
+                         ["wrong_date", "unplanned_write", "unread_file",
+                          "read_before_write"])
+
+    def test_a_guard_abstains_by_returning_none(self):
+        g = self._state()
+        g.name, g.args = "list_emails", {}
+        self.assertIsNone(agent.run_guards(g))
+
+    def test_denial_is_monotonic_nothing_after_the_first_speaker_runs(self):
+        """The property goal 2 exists for: once a guard has questioned a call,
+        no later guard is consulted, so nothing can turn a question back into
+        permission."""
+        ran = []
+
+        def first(g):
+            ran.append("first")
+            return "questioned by first"
+
+        def second(g):
+            ran.append("second")
+            return None
+
+        g = self._state()
+        g.name, g.args = "send_email", {}
+        got = agent.run_guards(g, [("first", first), ("second", second)])
+        self.assertEqual(got, ("first", "questioned by first"))
+        self.assertEqual(ran, ["first"], "a guard after the first speaker ran")
+
+    def test_a_later_guard_cannot_reverse_an_earlier_question(self):
+        g = self._state()
+        g.name, g.args = "send_email", {}
+        got = agent.run_guards(g, [("deny", lambda s: "no"),
+                                   ("allow", lambda s: None)])
+        self.assertEqual(got[0], "deny")
+
+    # ---- the individual guards ----
+
+    def test_wrong_date_fires_on_writes_only(self):
+        g = self._state(task="Book it on Thursday")
+        g.name, g.args = "add_event", {"date": "2026-07-20"}
+        self.assertIsNotNone(agent.guard_wrong_date(g))
+        g.name = "list_events"
+        self.assertIsNone(agent.guard_wrong_date(g),
+                          "a read with a mismatched date is the model looking around")
+
+    def test_unplanned_write_questions_once_then_lets_it_through(self):
+        g = self._state(plan="1. list_emails - look")
+        g.name, g.args = "send_email", {}
+        first = agent.guard_unplanned_write(g)
+        self.assertIn("never included send_email", first)
+        self.assertIsNone(agent.guard_unplanned_write(g),
+                          "questioned twice; the contract is question ONCE")
+
+    def test_the_unplanned_write_nudge_never_tells_the_model_to_do_less(self):
+        """This message once ended 'Only do what the task requires - nothing
+        extra', and an 8B obeyed that instead of insisting: the question became
+        a block in practice, the model abandoned the job and reported success."""
+        g = self._state(plan="1. list_emails - look")
+        g.name, g.args = "send_email", {}
+        msg = agent.guard_unplanned_write(g)
+        self.assertNotIn("nothing extra", msg)
+        self.assertIn("call it again and it will run", msg)
+
+    def test_save_memory_is_exempt_from_the_unplanned_write_guard(self):
+        g = self._state(plan="1. list_emails - look")
+        g.name, g.args = "save_memory", {"fact": "x"}
+        self.assertIsNone(agent.guard_unplanned_write(g))
+
+    def test_read_before_write_needs_a_read_the_plan_put_first(self):
+        g = self._state(plan="1. list_emails - look\n2. send_email - reply")
+        g.name, g.args = "send_email", {}
+        self.assertIn("You planned to call list_emails first",
+                      agent.guard_read_before_write(g))
+        self.assertIsNone(agent.guard_read_before_write(g), "question ONCE")
+
+    def test_read_before_write_stays_quiet_once_something_was_read(self):
+        g = self._state(plan="1. list_emails - look\n2. send_email - reply")
+        g.looked = True
+        g.name, g.args = "send_email", {}
+        self.assertIsNone(agent.guard_read_before_write(g))
+
+    def test_a_plan_that_never_proposed_looking_holds_the_model_to_nothing(self):
+        g = self._state(plan="1. send_email - reply")
+        self.assertIsNone(g.first_read_planned)
+        g.name, g.args = "send_email", {}
+        self.assertIsNone(agent.guard_read_before_write(g))
+
+    def _seed(self, g, name="export.xlsx"):
+        os.makedirs(g.world.files_dir, exist_ok=True)
+        open(os.path.join(g.world.files_dir, name), "wb").close()
+        return name
+
+    def test_unread_file_fires_only_for_a_file_the_run_was_told_about(self):
+        g = self._state()
+        f = self._seed(g)
+        g.name, g.args = "create_spreadsheet", {}
+        self.assertIsNone(agent.guard_unread_file(g), "nothing mentioned yet")
+        g.mentioned_files.add(f)
+        msg = agent.guard_unread_file(g)
+        self.assertIn(f, msg)
+        self.assertIn("read_spreadsheet", msg)
+        self.assertIsNone(agent.guard_unread_file(g), "question ONCE")
+
+    def test_unread_file_ignores_a_file_already_opened(self):
+        g = self._state()
+        f = self._seed(g)
+        g.name, g.args = "create_spreadsheet", {}
+        g.mentioned_files.add(f)
+        g.opened_files.add(f)
+        self.assertIsNone(agent.guard_unread_file(g))
+
+    def test_unread_file_ignores_a_mention_of_a_file_that_is_not_here(self):
+        """The run being told about a file it cannot open is not evidence of
+        anything; only a file that exists on disk is."""
+        g = self._state()
+        g.name, g.args = "create_spreadsheet", {}
+        g.mentioned_files.add("somewhere_else.xlsx")
+        self.assertIsNone(agent.guard_unread_file(g))
+
+    def test_unread_file_only_fires_for_a_tool_that_writes_a_file(self):
+        g = self._state()
+        f = self._seed(g)
+        g.mentioned_files.add(f)
+        g.name, g.args = "send_email", {}
+        self.assertIsNone(agent.guard_unread_file(g))
+
+    def test_every_guard_message_offers_a_way_through(self):
+        """Question once, never forbid. A guard that leaves the model no way
+        forward is a block wearing a question's clothes."""
+        cases = [
+            ("unplanned_write", agent.guard_unplanned_write,
+             self._state(plan="1. list_emails - look"), "send_email"),
+            ("read_before_write", agent.guard_read_before_write,
+             self._state(plan="1. list_emails - look\n2. send_email - reply"), "send_email"),
+        ]
+        for name, check, g, call in cases:
+            g.name, g.args = call, {}
+            msg = check(g)
+            self.assertIsNotNone(msg, name)
+            self.assertIn("it will run", msg, name)
+
+
 # ------------------------------------------------------------------- memory ---
 
 class TestMemory(unittest.TestCase):

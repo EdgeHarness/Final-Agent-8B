@@ -375,8 +375,8 @@ RESPONSE FORMAT - every reply must be exactly one JSON object:
 Rules:
 - ONE tool call per reply. No text outside the JSON object.
 - Only do what the task requires - nothing extra.
-- Look before you act: read the relevant emails or calendar before writing anything
-  that depends on them. This applies even when you already believe you know the answer.
+- Look before you act: read whatever the task depends on before writing anything
+  that depends on it. This applies even when you already believe you know the answer.
 - Dates must be YYYY-MM-DD. Times must be 24-hour HH:MM.
 - If a tool returns an ERROR, fix the arguments and try again.
 - When every part of the task is complete, call done with a short summary.
@@ -397,7 +397,16 @@ PLAN_PROMPT = ('Which tools will you need to call to complete this task, in orde
                'Most tasks need only 1-4 calls. Do not include tools the task does not need.')
 
 
-FILENAME_RE = re.compile(r"\b[\w.\-]+\.xlsx\b")
+def filename_re():
+    """Filenames the run could actually be told to open, built from the
+    extensions the registered read tools declare. This was a literal .xlsx
+    regex, so the unread-file guard was blind to every other document type a
+    domain might register."""
+    exts = tools.openable_extensions()
+    if not exts:
+        return None
+    alt = "|".join(re.escape(e.lstrip(".")) for e in sorted(exts))
+    return re.compile(r"\b[\w.\-]+\.(?:" + alt + r")\b")
 
 # The tools that change something, derived from the effect class each tool
 # declares in the registry rather than listed here. This used to be a literal
@@ -466,6 +475,190 @@ def plan_step(llm, messages, ep):
     return plan
 
 
+# --------------------------------------------------------------- guards ----
+#
+# Every guard in this loop follows one contract: QUESTION ONCE, NEVER FORBID.
+# A guard returns the sentence to put in front of the model, or None to
+# abstain. A call the model repeats after being questioned is allowed to run.
+# Do not turn any of these into a block; that invariant is the whole design,
+# and it has been broken by accident before - see the wording note on
+# guard_unplanned_write.
+#
+# They used to be inline `if ... continue` blocks in one 345-line function, so
+# their order was statement order, a domain could not add one, and none could
+# be tested without scripting a whole run. They are named entries in GUARDS
+# now, and run_guards stops at the first one that speaks: DENIAL IS MONOTONIC,
+# a later guard never sees a questioned call and so can never turn a question
+# back into permission.
+
+
+class GuardState:
+    """Everything a guard may read or change, for one run.
+
+    One object rather than a dozen closure variables, so a guard is an ordinary
+    function that can be called from a test with a hand-built state."""
+
+    def __init__(self, llm, world, ep, messages, task_text, write_tools, plan):
+        self.llm, self.world, self.ep = llm, world, ep
+        self.messages, self.task_text = messages, task_text
+        self.write_tools = write_tools
+        self.name, self.args = None, None       # the call being judged
+        self.plan = plan
+        self.planned = planned_tools(plan)
+        self.planned_set = set(self.planned)
+        # The read the plan itself put BEFORE its first write. Only that counts:
+        # taking the first non-write was wrong, because a plan of think ->
+        # create -> read reads back the file it is about to create, and the
+        # nudge sent the agent to open something that did not exist yet.
+        first_write_at = next((i for i, t in enumerate(self.planned)
+                               if t in write_tools), None)
+        self.first_read_planned = None
+        if first_write_at is not None:
+            self.first_read_planned = next(
+                (t for t in self.planned[:first_write_at]
+                 if t not in ("think", "done") and t not in write_tools), None)
+        self.looked = False
+        self.nudged_to_look = False
+        self.replanned = False
+        self.questioned_writes = set()
+        # Files the run was TOLD about (a filename inside something it read)
+        # versus files it has actually opened.
+        self.mentioned_files = set()
+        self.opened_files = set()
+        self.questioned_files = set()
+
+    def is_write(self):
+        return self.name in self.write_tools
+
+
+def guard_wrong_date(g):
+    """A date the model wrote itself, checked against the date the task names.
+
+    Writes only. The guard exists to stop a write landing on the wrong day; a
+    READ with a mismatched date is the model looking around, and the result
+    comes back as evidence either way. Checked on every call, it hounded a run
+    whose task merely said "never on Fridays": four corrections for four
+    innocent list_events probes, 14 calls for a task that needs four."""
+    if not g.is_write():
+        return None
+    wrong_day = task_date_mismatch(g.task_text, g.args)
+    if not wrong_day:
+        return None
+    g.ep.invalid_calls += 1
+    return "WRONG DATE: " + wrong_day + " Reply with one corrected JSON object."
+
+
+def guard_unplanned_write(g):
+    """A write the plan never proposed, questioned once.
+
+    Observed live: asked only to "list my emails", an 8B read one, then SENT an
+    email, added a calendar event and messaged a third party - four side
+    effects for a read-only request, and every surface reported success.
+    Harmless against the simulation; real mail the moment a live account is
+    wired. save_memory is exempt: remembering is never a side effect on
+    another person.
+
+    The replan is here because the plan is written before the agent has read
+    anything, so on any task whose requirements live in the data ("read this
+    and do what it asks") the plan CANNOT name the work, and holding the model
+    to it punishes it for discovering the job. Observed live: plan was
+    list/read/send, the data asked for a spreadsheet, the model correctly
+    called create_spreadsheet, this guard questioned it, and the model gave up
+    and sent a message claiming it had built the sheet. Nothing was built.
+    A plan made before discovery is a hypothesis, so once a read has landed,
+    spend one call revising it. Only once: a model that could replan on every
+    surprise could rewrite its way to anything.
+
+    Wording note, load-bearing. This message once ended "Only do what the task
+    requires - nothing extra", and an 8B obeyed THAT instead of insisting. The
+    question became a block in practice. Do not reintroduce that clause."""
+    if not (g.planned_set and g.is_write() and g.name != "save_memory"
+            and g.name not in g.planned_set and g.name not in g.questioned_writes):
+        return None
+    if g.looked and not g.replanned:
+        g.replanned = True
+        g.messages.append({"role": "user", "content": REPLAN_PROMPT.format(
+            task=g.task_text, plan=g.plan or "(none)")})
+        g.plan = plan_step(g.llm, g.messages, g.ep) or g.plan
+        g.messages.pop()
+        g.planned = planned_tools(g.plan)
+        g.planned_set = set(g.planned)
+    if g.name in g.planned_set:
+        return None
+    g.questioned_writes.add(g.name)
+    return (f"Your plan for this task never included {g.name}, and the task is: "
+            f"\"{g.task_text}\". If {g.name} is genuinely what the task needs, "
+            f"call it again and it will run. If it is not, continue with the "
+            f"plan or call done.")
+
+
+def guard_unread_file(g):
+    """Writing a file while the task's own data sits unopened in another one.
+
+    Same contract as guard_read_before_write, one step further in: there,
+    nothing has been read at all; here, something WAS read and it named a file
+    that exists and is still unopened. Observed live: a message said "the
+    export is in q3_raw.xlsx", the agent never opened it, and invented
+    Sales/Profit rows with formulas summing empty cells."""
+    if g.name not in tools.file_writing_tools():
+        return None
+    unread = sorted(g.mentioned_files & set(g.world.file_names())
+                    - g.opened_files - g.questioned_files)
+    opener = tools.opener_for(unread[0]) if unread else None
+    if not (unread and opener):
+        return None
+    g.questioned_files.update(unread)
+    return (f"What you read names {unread[0]}, which exists here, and you "
+            f"have not opened {unread[0]} yet - so {g.name} would be writing "
+            f"from memory rather than from the task's own data. Call "
+            f"{opener} on it first. If you genuinely do not need it, "
+            f"call {g.name} again and it will run.")
+
+
+def guard_read_before_write(g):
+    """The model planned to look something up, then writes without looking.
+
+    The worst failure this app can produce, observed live: asked to build a
+    spreadsheet of July receipts, an 8B skipped straight to the write and
+    invented 100/200/300/400/500 for receipts that are really $230.00, $87.50
+    and $412.30. It saved the invented total to long-term memory as a fact,
+    and the run reported success - every check downstream can see that a file
+    was written and none can see that its numbers were made up."""
+    if not (g.first_read_planned and not g.looked and not g.nudged_to_look
+            and g.is_write() and g.name != "save_memory"):
+        return None
+    g.nudged_to_look = True
+    return (f"You planned to call {g.first_read_planned} first and have not read "
+            f"anything yet, so {g.name} would be writing from memory rather than "
+            f"from the task's own data. Call {g.first_read_planned} first. If you "
+            f"genuinely do not need it, call {g.name} again and it will run.")
+
+
+# Order matters and is stated here rather than buried in statement order.
+# A domain pack appends its own; every entry gets the same contract.
+GUARDS = [
+    ("wrong_date", guard_wrong_date),
+    ("unplanned_write", guard_unplanned_write),
+    ("unread_file", guard_unread_file),
+    ("read_before_write", guard_read_before_write),
+]
+
+
+def run_guards(g, guards=None):
+    """First guard to speak wins. Returns (guard_name, message) or None.
+
+    Monotonic on purpose: once a guard has questioned a call, no later guard
+    runs, so nothing downstream can turn the question back into permission.
+    Guards after the first are not consulted and their side effects do not
+    happen, which is why an expensive one (the replan) sits behind a cheap
+    predicate rather than in front of it."""
+    for name, check in (GUARDS if guards is None else guards):
+        message = check(g)
+        if message:
+            return name, message
+    return None
+
+
 def run_harness(llm, world, mem, task_text, history=""):
     """history: prior conversation turns as a text block (harness/chat.py
     prompt_block). Empty by default, so a run with no conversation behind it
@@ -481,7 +674,7 @@ def run_harness(llm, world, mem, task_text, history=""):
         # opening the calendar, which held three meetings. A memory is a hint
         # from an earlier run, not a reading of the world as it is now.
         memory_block = ("\n\nNOTES FROM EARLIER TASKS (hints, not facts - they may be out "
-                        "of date. If one describes the inbox, the calendar or a file, "
+                        "of date. If one describes something that can change, "
                         "check the real thing before you rely on it):\n"
                         + "\n".join(f"- {f}" for f in memories))
     system = HARNESS_SYSTEM.format(today=SIM_TODAY_HUMAN, shape=SHAPE,
@@ -512,53 +705,10 @@ def run_harness(llm, world, mem, task_text, history=""):
                          # the moment anything writes
     write_tools = set(world_changing_tools())
 
-    # The plan was rendered for the model to read and then never looked at
-    # again. It is the only statement of intent the run has, so it is worth one
-    # check: if the model planned to look something up and then writes a
-    # document before looking at anything, say so once.
-    #
-    # Observed live, and it is the worst failure this app can produce: asked to
-    # build a spreadsheet of July receipts, an 8B skipped to create_spreadsheet
-    # and invented 100/200/300/400/500 for receipts that are really $230.00,
-    # $87.50 and $412.30. It saved the invented total to long-term memory as a
-    # fact, and the run reported success - every check downstream can see that a
-    # file was written and none can see that its numbers were made up.
-    # Only a read the plan itself put BEFORE its first write counts. Taking the
-    # first non-write in the plan was wrong: a plan of think -> create_spreadsheet
-    # -> read_spreadsheet reads back the file it is about to create, and the
-    # nudge sent the agent to open a spreadsheet that did not exist yet. If the
-    # plan never proposed looking at anything first, there is nothing to hold
-    # the model to and the loop says nothing.
-    planned = planned_tools(plan)
-    first_write_at = next((i for i, t in enumerate(planned) if t in write_tools), None)
-    first_read_planned = None
-    if first_write_at is not None:
-        first_read_planned = next((t for t in planned[:first_write_at]
-                                   if t not in ("think", "done") and t not in write_tools),
-                                  None)
-    looked = False
-    nudged_to_look = False
-    # The other half of holding the model to its own plan. Observed live: asked
-    # only to "list my emails", an 8B read one, then SENT an email, added a
-    # calendar event and messaged a third party - four side effects for a
-    # read-only request, and every surface reported success. Harmless against
-    # the simulation; real mail the moment a live account is wired. A write the
-    # plan never named is questioned once, then allowed if the model insists -
-    # the same contract as the read-before-write nudge: the harness questions,
-    # it never forbids. Only armed when a plan exists, and save_memory is
-    # exempt (remembering is never a side effect on another person).
-    planned_set = set(planned)
-    questioned_writes = set()
-    replanned = False
-    # Files the run has been TOLD about (a filename inside something it read)
-    # versus files it has actually opened. Writing a document while the task's
-    # own data sits unopened in a file on disk is the same failure as writing
-    # before reading anything, one step further in: observed live, an email said
-    # "the export is in q3_raw.xlsx", the agent never opened it, and invented
-    # Sales/Profit rows with formulas summing empty cells.
-    mentioned_files = set()
-    opened_files = set()
-    questioned_files = set()
+    # All guard state lives on one object so a guard is an ordinary function a
+    # test can call directly. The reasoning behind each field is on the guard
+    # that uses it.
+    g = GuardState(llm, world, ep, messages, task_text, write_tools, plan)
     echo_questioned = False
     last_reply = None
     think_streak = 0
@@ -634,19 +784,6 @@ def run_harness(llm, world, mem, task_text, history=""):
             args = normalize_args(name, args)
 
             problems = validate_call(name, args)
-            # Writes only. The guard exists to stop a write landing on the wrong
-            # day; a READ with a mismatched date is the model looking around,
-            # and the result comes back as evidence either way. Checked on
-            # every call, it hounded a run whose task merely said "never on
-            # Fridays": four corrections for four innocent list_events probes,
-            # 14 calls for a task that needs four.
-            wrong_day = (task_date_mismatch(task_text, args)
-                         if not problems and name in write_tools else None)
-            if wrong_day:
-                ep.invalid_calls += 1
-                give_feedback("WRONG DATE: " + wrong_day + " Reply with one corrected JSON object.",
-                              reply)
-                continue
             if problems:
                 ep.invalid_calls += 1
                 hint = ""
@@ -662,66 +799,14 @@ def run_harness(llm, world, mem, task_text, history=""):
                 continue
             last_reply = reply
 
-            if (planned_set and name in write_tools and name != "save_memory"
-                    and name not in planned_set and name not in questioned_writes):
-                # The plan is written before the agent has read anything, so on
-                # any task whose requirements live in the data ("read this email
-                # and do what it asks") it CANNOT name the work. Holding the
-                # model to it then punishes the model for discovering the job.
-                # Observed live: plan was list/read/send, the email asked for a
-                # spreadsheet, the model correctly called create_spreadsheet,
-                # this guard questioned it, and the model gave up and sent an
-                # email claiming it had built the sheet. Nothing was built and
-                # every surface reported success.
-                #
-                # So: a plan made before discovery is a hypothesis. Once a read
-                # has landed, spend one call revising it instead. Only once - a
-                # model that could re-plan on every surprise could rewrite its
-                # way to anything, which is the guard this replaces.
-                if looked and not replanned:
-                    replanned = True
-                    messages.append({"role": "user", "content": REPLAN_PROMPT.format(
-                        task=task_text, plan=plan or "(none)")})
-                    plan = plan_step(llm, messages, ep) or plan
-                    messages.pop()
-                    planned = planned_tools(plan)
-                    planned_set = set(planned)
-                if name not in planned_set:
-                    questioned_writes.add(name)
-                    give_feedback(
-                        f"Your plan for this task never included {name}, and the task is: "
-                        f"\"{task_text}\". If {name} is genuinely what the task needs, "
-                        f"call it again and it will run. If it is not, continue with the "
-                        f"plan or call done.",
-                        reply)
-                    continue
-
-            # Same contract, one step further in than the nudge below: there,
-            # nothing has been read at all; here, something was read and it
-            # named a file that exists and is still unopened.
-            unread = sorted(mentioned_files & set(world.file_names()) - opened_files
-                            - questioned_files)
-            if unread and name in ("create_spreadsheet", "create_presentation"):
-                questioned_files.update(unread)
-                give_feedback(
-                    f"What you read names {unread[0]}, which exists here, and you "
-                    f"have not opened {unread[0]} yet - so {name} would be writing "
-                    f"from memory rather than from the task's own data. Call "
-                    f"read_spreadsheet on it first. If you genuinely do not need it, "
-                    f"call {name} again and it will run.",
-                    reply)
-                continue
-
-            # One nudge, never a block: if it insists, the next identical call runs.
-            if (first_read_planned and not looked and not nudged_to_look
-                    and name in write_tools and name != "save_memory"):
-                nudged_to_look = True
-                give_feedback(
-                    f"You planned to call {first_read_planned} first and have not read "
-                    f"anything yet, so {name} would be writing from memory rather than "
-                    f"from the task's own data. Call {first_read_planned} first. If you "
-                    f"genuinely do not need it, call {name} again and it will run.",
-                    reply)
+            # The cross-checks. First guard to speak wins and nothing after it
+            # runs, so a question cannot be reversed downstream.
+            g.name, g.args = name, args
+            questioned = run_guards(g)
+            if questioned:
+                guard_name, message = questioned
+                ep.note("guard", guard_name)
+                give_feedback(message, reply)
                 continue
 
             sig = json.dumps({"t": name, "a": args}, sort_keys=True, default=str)
@@ -769,13 +854,15 @@ def run_harness(llm, world, mem, task_text, history=""):
 
             ok, obs = execute(name, args, world, mem)
             if ok and name not in write_tools and name != "think":
-                looked = True
+                g.looked = True
                 # A filename the run was told about, from the result rather than
                 # from the model's own words: a model that writes "I'll check
                 # data.xlsx" has not been told anything.
-                mentioned_files.update(FILENAME_RE.findall(str(obs)))
-            if ok and name == "read_spreadsheet":
-                opened_files.add(str(args.get("filename", "")))
+                _fre = filename_re()
+                if _fre:
+                    g.mentioned_files.update(_fre.findall(str(obs)))
+            if ok and (TOOLS.get(name, {}).get("opens")):
+                g.opened_files.add(str(args.get("filename", "")))
             if ok and name in write_tools:
                 world_version += 1
             # recorded against the world version AFTER any bump, so an identical
@@ -800,8 +887,8 @@ VERIFY_SYSTEM = ("You are a task-completion verifier. Today is {today}.\n"
                  "requirement the task states has a matching successful action, "
                  "the task is complete. When in doubt, answer complete: true.\n"
                  "If the task DELEGATES its requirements to something the "
-                 "assistant read (\"do what the email asks\", \"produce what she "
-                 "wants\"), then the requirements are whatever that read's result "
+                 "assistant read (\"do what the request says\", \"produce what they "
+                 "asked for\"), then the requirements are whatever that read's result "
                  "asked for, and actions that satisfy them were requested.\n"
                  "Separately, report any action that CHANGED something (sent, "
                  "created, updated, cancelled) that the task never asked for. "

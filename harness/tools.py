@@ -134,6 +134,7 @@ TOOLS = {
     },
     "create_presentation": {
         "effect": "revertible_write",
+        "writes_file": True,
         "desc": "Create a real .pptx PowerPoint file. Each slide is an object with a "
                 "'title' and an optional 'bullets' list. A first slide without bullets "
                 "becomes a title slide.",
@@ -147,6 +148,7 @@ TOOLS = {
     },
     "create_spreadsheet": {
         "effect": "revertible_write",
+        "writes_file": True,
         "desc": "Create a real .xlsx Excel file from a list of rows (first row is usually "
                 "headers). A cell string starting with '=' becomes a formula.",
         "params": {"filename": ("string ending in .xlsx", True),
@@ -161,6 +163,7 @@ TOOLS = {
     },
     "read_spreadsheet": {
         "effect": "read",
+        "opens": (".xlsx",),
         "desc": "Read back the cell contents of an existing .xlsx file.",
         "params": {"filename": ("string ending in .xlsx", True)},
         "example": {"tool": "read_spreadsheet", "args": {"filename": "costs.xlsx"}},
@@ -210,6 +213,38 @@ for _name, _spec in TOOLS.items():
         raise ValueError(f"tool {_name!r} declares effect {_spec.get('effect')!r}; "
                          f"must be one of {', '.join(EFFECTS)}")
 del _name, _spec
+
+
+# Two more optional per-tool declarations, both domain-neutral:
+#   "opens": (".ext", ...)  this tool reads a file of that type
+#   "writes_file": True     this tool produces a file
+# The loop used to spell both as office tool names and an .xlsx regex, which
+# meant the unread-file guard only ever fired for spreadsheets and decks.
+
+
+def openable_extensions(registry=None):
+    """Every file extension some registered tool can open."""
+    reg = registry if registry is not None else TOOLS
+    out = set()
+    for spec in reg.values():
+        out.update(spec.get("opens") or ())
+    return frozenset(out)
+
+
+def opener_for(path, registry=None):
+    """The name of a tool that can open this file, or None."""
+    reg = registry if registry is not None else TOOLS
+    low = str(path).lower()
+    for name, spec in reg.items():
+        if any(low.endswith(ext.lower()) for ext in (spec.get("opens") or ())):
+            return name
+    return None
+
+
+def file_writing_tools(registry=None):
+    """Every registered tool that produces a file."""
+    reg = registry if registry is not None else TOOLS
+    return frozenset(n for n, s in reg.items() if s.get("writes_file"))
 
 
 def effect_of(name, registry=None):
