@@ -100,10 +100,22 @@ function applyEffects(effects) {
 
 /* Which argument names the file a tool produced. Office files land in the
    agent's workspace, which is what /api/preview can read, so those get a real
-   preview pane. write_file and append_file go to the user's own folder: they
-   belong in the touched strip, but there is nothing to render for them. */
+   preview pane. The real-folder writers go to the user's own folder: they
+   belong in the touched strip, but there is nothing to render for them.
+
+   move_path names its result in `to`, not `path`. It was missing, so a moved
+   file never appeared in the strip at all and a run that reorganised a folder
+   looked like it had done nothing.
+
+   delete_path is deliberately absent. The strip is a list of files you can
+   click to open, and a chip for something that no longer exists offers to
+   open nothing. A deletion belongs in the timeline, where it already is, not
+   in a strip of artifacts. */
 const ARTIFACT_ARG = { create_presentation: 'filename', create_spreadsheet: 'filename' };
-const TOUCH_ARG = { ...ARTIFACT_ARG, write_file: 'path', append_file: 'path' };
+const TOUCH_ARG = {
+  ...ARTIFACT_ARG,
+  write_file: 'path', append_file: 'path', move_path: 'to',
+};
 
 const S = {
   agents: [], agent: null, ws: null, run: null, es: null,
