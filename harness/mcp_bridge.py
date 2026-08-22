@@ -59,7 +59,8 @@ WRITE_TOOLS = set()
 
 _CLIENTS = []                     # live MCPClient processes, terminated on shutdown
 _CONFIRM = None                   # callable(action, detail) -> bool, or None
-_INJECTED = set()                 # harness tool names this module added, for a clean teardown
+_INJECTED = set()                 # harness tool names this module added
+_UNDO = []                        # disposers for every registry change, run LIFO
 
 # A world-changing verb anywhere in the tool name. Heuristic; overridable per server.
 _WRITE_RE = re.compile(
@@ -407,14 +408,14 @@ def _register(client, tool, server_cfg, prefix, draft_only, seen_names):
     desc = str(tool.get("description", "")).strip().replace("\n", " ")
     tag = "[real, needs confirmation] " if is_write else "[real, read-only] "
     hint = (server_cfg.get("arg_hints") or {}).get(mcp_name)
-    TOOLS[harness_name] = {
+    _UNDO.append(tools.register(harness_name, {
         "effect": _effect_class(mcp_name, is_write),
         "desc": tag + (desc or mcp_name),
         "params": _params_from_schema(schema, hint=hint,
                                       hide=server_cfg.get("hide_params") or ()),
         "example": _example_for(harness_name, schema, hint),
         "run": _make_executor(client, mcp_name, is_write),
-    }
+    }))
     seen_names.add(harness_name)
     _INJECTED.add(harness_name)
     if is_write:
@@ -443,8 +444,9 @@ def restrict_to_mcp(keep_office_docs=True, keep_extra=()):
     drop = tools.simulated_connector_tools() - set(_INJECTED) - set(keep_extra)
     if not keep_office_docs:
         drop |= tools.document_tools() - set(_INJECTED) - set(keep_extra)
-    for name in drop:
-        TOOLS.pop(name, None)
+    undo = tools.suppress(drop)
+    _UNDO.append(undo)
+    return undo
 
 
 def enable(servers, confirm=None, mode="draft"):
@@ -505,9 +507,18 @@ def mail_rules(mode="draft"):
 
 
 def shutdown():
+    """Close the servers AND undo every registry change, newest first.
+
+    This used to close the subprocesses and leave their tools in the shared
+    registry, so a process that enabled MCP kept offering real-account tools
+    with nothing behind them for the rest of its life. A registration that
+    cannot be undone is not a registration, it is a leak."""
     for c in _CLIENTS:
         c.close()
     _CLIENTS.clear()
+    while _UNDO:
+        _UNDO.pop()()
+    _INJECTED.clear()
 
 
 atexit.register(shutdown)

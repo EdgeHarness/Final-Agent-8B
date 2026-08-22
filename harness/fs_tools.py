@@ -21,6 +21,7 @@ import shutil
 import subprocess
 import sys
 
+from . import tools
 from .tools import TOOLS
 from .world import ToolError
 
@@ -342,6 +343,9 @@ WRITE_TOOLS = {n for n, s in _FS_TOOLS.items() if s["effect"] != "read"}
 # simulated inbox/calendar/messages/office suite) is dropped.
 _KEEP_ALWAYS = {"think", "save_memory", "recall_memories", "done"}
 
+# Disposers for every registry change this module made, run LIFO.
+_UNDO = []
+
 
 def injected():
     """The file tools currently in the registry — which is flag-dependent, since
@@ -354,11 +358,14 @@ def restrict_to_files():
     """Drop the simulated-office tools so a real-folder agent isn't distracted
     by a fake inbox/calendar (a known attractor for small models). Leaves the
     file tools plus think / memory / done. Process-local; the benchmark, in its
-    own process, is unaffected."""
+    own process, is unaffected.
+
+    Returns the disposer that puts them back, so the change carries its own
+    inverse like every other registry mutation."""
     keep = set(_FS_TOOLS) | _KEEP_ALWAYS
-    for name in list(TOOLS):
-        if name not in keep:
-            TOOLS.pop(name, None)
+    undo = tools.suppress([n for n in list(TOOLS) if n not in keep])
+    _UNDO.append(undo)
+    return undo
 
 
 def enable(root, allow_shell=False, confirm=None, shell_only=False, deny=None):
@@ -377,11 +384,17 @@ def enable(root, allow_shell=False, confirm=None, shell_only=False, deny=None):
     _ROOT, _ALLOW_SHELL, _CONFIRM = root, allow_shell, confirm
     _DENY_WRITE = _default_deny() + [os.path.abspath(os.path.expanduser(d))
                                      for d in (deny or [])]
+    changes = {}
     for name, spec in _FS_TOOLS.items():
         want = not (shell_only and name != "run_command") and not (
             name == "run_command" and not allow_shell)
-        if want:
-            TOOLS[name] = spec
-        else:
-            TOOLS.pop(name, None)  # keep the registry matching the flags on re-enable
+        # None removes, so the registry matches the flags on re-enable.
+        changes[name] = spec if want else None
+    _UNDO.append(tools.edit_registry(changes))
     return root
+
+
+def disable():
+    """Undo every registry change this module made, newest first."""
+    while _UNDO:
+        _UNDO.pop()()

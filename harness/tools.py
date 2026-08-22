@@ -265,6 +265,54 @@ def opener_for(path, registry=None):
     return None
 
 
+# --------------------------------------------------- registry mutation ----
+#
+# Every change to the shared registry goes through one primitive that returns
+# its own inverse. Three modules mutate TOOLS - the MCP bridge, the real-file
+# tools, and the two restrict_* helpers - and each used to do it by hand with a
+# partial undo or none at all: mcp_bridge.shutdown() closed its subprocesses
+# but left their tools in the registry forever, and neither restrict_ function
+# could be reversed at all.
+#
+# This is the paper's revertible-effect idea at the only scale we need it:
+# registration and its undo are written in one place, so "did we clean up
+# completely" stops being a question a reviewer has to answer by reading.
+
+_ABSENT = object()
+
+
+def edit_registry(changes, registry=None):
+    """Apply {name: spec, other: None} and return a callable restoring exactly
+    the previous state. None removes. The undo is idempotent and restores what
+    was shadowed, not merely what was added."""
+    reg = registry if registry is not None else TOOLS
+    before = {n: reg.get(n, _ABSENT) for n in changes}
+    for name, spec in changes.items():
+        if spec is None:
+            reg.pop(name, None)
+        else:
+            reg[name] = spec
+
+    def undo():
+        for name, prev in before.items():
+            if prev is _ABSENT:
+                reg.pop(name, None)
+            else:
+                reg[name] = prev
+    return undo
+
+
+def register(name, spec, registry=None):
+    """Add one tool. Returns the disposer that removes it again."""
+    return edit_registry({name: spec}, registry)
+
+
+def suppress(names, registry=None):
+    """Hide tools without destroying them. Returns the disposer that restores
+    every one that was actually present."""
+    return edit_registry({n: None for n in names}, registry)
+
+
 def simulated_connector_tools(registry=None):
     """Tools that simulate a connector a real account would replace.
 

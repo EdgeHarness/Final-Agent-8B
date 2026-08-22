@@ -607,8 +607,9 @@ def guard_unplanned_write(g):
         return None
     if g.looked and not g.replanned:
         g.replanned = True
-        g.messages.append({"role": "user", "content": REPLAN_PROMPT.format(
-            task=g.task_text, plan=g.plan or "(none)")})
+        ask = REPLAN_PROMPT.format(task=g.task_text, plan=g.plan or "(none)")
+        g.ep.note("prompt", ask)
+        g.messages.append({"role": "user", "content": ask})
         g.plan = plan_step(g.llm, g.messages, g.ep) or g.plan
         g.messages.pop()
         g.planned = planned_tools(g.plan)
@@ -719,13 +720,19 @@ def run_harness(llm, world, mem, task_text, history=""):
     # should not spend a call producing one.
     plan = ""
     if PROFILE.plan:
-        messages.append({"role": "user", "content": f"TASK: {task_text}\n\n{PLAN_PROMPT}"})
+        ask = f"TASK: {task_text}\n\n{PLAN_PROMPT}"
+        # Model-visible means logged, including the request that is popped from
+        # the context straight afterwards. Being short-lived is not a reason to
+        # be invisible: it still shaped the plan the whole run then follows.
+        ep.note("prompt", ask)
+        messages.append({"role": "user", "content": ask})
         plan = plan_step(llm, messages, ep)
         messages.pop()  # the plan request leaves the context; the plan re-enters as guidance
     act = f"TASK: {task_text}\n\n"
     if plan:
         act += f"Suggested tool sequence (adapt if the results demand it):\n{plan}\n\n"
     act += f"Make the first tool call now. Reply with exactly one JSON object: {SHAPE}"
+    ep.note("prompt", act)
     messages.append({"role": "user", "content": act})
 
     verify_rounds = 0
@@ -779,7 +786,7 @@ def run_harness(llm, world, mem, task_text, history=""):
             if name == "done":
                 if verify_rounds < PROFILE.verify_rounds and llm.calls < MAX_CALLS:
                     verify_rounds += 1
-                    verdict = _verify(llm, world, task_text)
+                    verdict = _verify(llm, world, task_text, ep)
                     ep.note("verify", json.dumps(verdict, ensure_ascii=False))
                     # Carried on the episode, not acted on: the writes already
                     # happened, and auto-undoing them would be a bigger side
@@ -932,7 +939,7 @@ VERIFY_SYSTEM = ("You are a task-completion verifier. Today is {today}.\n"
                  "not make the task incomplete.")
 
 
-def _verify(llm, world, task_text):
+def _verify(llm, world, task_text, ep=None):
     acts = [a for a in world.actions if a["tool"] != "think"]
     lines = []
     for a in acts:
@@ -961,8 +968,19 @@ def _verify(llm, world, task_text):
                 'task requirements with no matching action, or an empty string>", '
                 '"unrequested": "<TOOL NAMES ONLY, comma separated, of world-changing '
                 'actions the task never asked for - or an empty string>"}')
-    msgs = [{"role": "system", "content": VERIFY_SYSTEM.format(today=SIM_TODAY_HUMAN)},
+    system = VERIFY_SYSTEM.format(today=SIM_TODAY_HUMAN)
+    msgs = [{"role": "system", "content": system},
             {"role": "user", "content": prompt}]
+    # Model-visible means logged. The verdict was recorded and its INPUT was
+    # not, so the one call that decides whether done() is accepted was the one
+    # call nobody could inspect afterwards. That is not academic: the note in
+    # the audit that the verifier calls requested artifacts "unrequested" about
+    # half the time was investigated without ever seeing the evidence block it
+    # was given, and the two truncations that starved it (a 300-char world log
+    # inside a 200-char result cap) were found by reading code rather than by
+    # reading a transcript, because the transcript did not have it.
+    if ep is not None:
+        ep.note("verify_prompt", system + "\n\n" + prompt)
     # Failing open is the right call: a broken verifier must not trap the agent
     # in a loop it cannot exit. But an unmarked {"complete": true} is
     # indistinguishable from a genuine pass, so a systematically broken verifier

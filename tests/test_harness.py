@@ -724,6 +724,207 @@ class TestPlanNameRepair(unittest.TestCase):
         self.tmp.cleanup()
 
 
+
+# ------------------------------------------------- model-visible is logged ---
+
+OBS_PREFIX = "OBSERVATION: "
+
+
+class _SpyLLM:
+    """Records every conversation handed to the model, verbatim."""
+
+    def __init__(self, replies):
+        self.replies, self.calls, self._i = replies, 0, 0
+        self.seen = []
+
+    def chat(self, messages, **kw):
+        self.seen.append([dict(m) for m in messages])
+        self.calls += 1
+        reply = self.replies[min(self._i, len(self.replies) - 1)]
+        self._i += 1
+        return reply
+
+
+class TestModelVisibleIsLogged(unittest.TestCase):
+    maxDiff = None
+    """The invariant: anything that reaches a model request must be
+    reconstructable from the episode transcript.
+
+    Without it there is no reliable answer to "what did the model actually see
+    on the run where the guard fired", which is the only question an ablation
+    is asking. It caught a real gap the first time it ran: the verifier's
+    verdict was recorded and its INPUT was not, so the one call that decides
+    whether done() is accepted was the one call nobody could inspect."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.world = World(self.tmp.name)
+        self.mem = MemoryStore(os.path.join(self.tmp.name, "mem.jsonl"))
+        self._saved = agent.PROFILE
+
+    def tearDown(self):
+        agent.set_profile(self._saved)
+        self.tmp.cleanup()
+
+    @staticmethod
+    def _call(tool, **args):
+        return json.dumps({"thought": "t", "tool": tool, "args": args})
+
+    def _unlogged(self, ep, llm):
+        """Every distinct thing the model was shown that no note accounts for.
+
+        Exact containment, not the loose two-way substring match a first
+        attempt used: the task note is a substring of the verifier prompt, so
+        loose matching reported the verifier's input as logged when it was
+        not."""
+        logged = [str(n["content"]) for n in ep.transcript]
+        missing = []
+        for conv in llm.seen:
+            for msg in conv:
+                body = msg["content"]
+                if not body or not body.strip():
+                    continue
+                # One named exception, not a loose rule: the loop frames a tool
+                # result as "OBSERVATION: <result>" and the note carries the
+                # result alone. The variable content is fully reconstructable;
+                # only a constant the harness itself adds differs. Every other
+                # comparison stays exact containment.
+                probe = body[len(OBS_PREFIX):] if body.startswith(OBS_PREFIX) else body
+                if any(probe in note for note in logged):
+                    continue
+                if body in missing:
+                    continue
+                missing.append(body)
+        return missing
+
+    def test_every_message_the_model_saw_is_in_the_transcript(self):
+        agent.set_profile(profiles.replace(profiles.DEFAULT, plan=True, verify_rounds=1))
+        plan = '{"steps": [{"tool": "list_emails", "what": "look"}, ' \
+               '{"tool": "send_email", "what": "reply"}]}'
+        llm = _SpyLLM([
+            plan,
+            self._call("list_emails"),
+            self._call("send_email"),
+            self._call("done", summary="looked"),
+            '{"complete": true, "missing": "", "unrequested": ""}',
+        ])
+        ep = agent.run_harness(llm, self.world, self.mem, "look at the inbox and reply to Sam")
+        self.assertEqual(self._unlogged(ep, llm), [],
+                         "the model saw something the transcript cannot reconstruct")
+
+    def test_the_verifiers_input_is_logged_not_only_its_verdict(self):
+        """The gap this invariant found. The verifier decides whether done() is
+        accepted, so its evidence block is the most important thing in the run
+        to be able to read afterwards."""
+        agent.set_profile(profiles.replace(profiles.DEFAULT, plan=False, verify_rounds=1))
+        llm = _SpyLLM([
+            self._call("list_emails"),
+            self._call("done", summary="looked"),
+            '{"complete": true, "missing": "", "unrequested": ""}',
+        ])
+        ep = agent.run_harness(llm, self.world, self.mem, "look at the inbox")
+        kinds = [n["kind"] for n in ep.transcript]
+        self.assertIn("verify_prompt", kinds)
+        prompt = next(n["content"] for n in ep.transcript if n["kind"] == "verify_prompt")
+        self.assertIn("task-completion verifier", prompt, "the system prompt")
+        self.assertIn("ACTIONS THE ASSISTANT TOOK", prompt, "the evidence block")
+
+    def test_it_holds_when_a_guard_and_a_repair_are_in_play(self):
+        """The interesting runs are the ones with corrections in them, so the
+        invariant has to hold on those and not only on a clean pass."""
+        agent.set_profile(profiles.replace(profiles.DEFAULT, plan=True, verify_rounds=1))
+        plan = '{"steps": [{"tool": "list_email", "what": "look"}, ' \
+               '{"tool": "create_sheet", "what": "build"}]}'
+        llm = _SpyLLM([
+            plan,
+            self._call("send_email"),
+            self._call("send_email", to="a@b.c", subject="s", body="b"),
+            self._call("done", summary="sent"),
+            '{"complete": true, "missing": "", "unrequested": ""}',
+        ])
+        ep = agent.run_harness(llm, self.world, self.mem, "email someone")
+        self.assertEqual(self._unlogged(ep, llm), [])
+
+
+
+# ------------------------------------------------ revertible registration ---
+
+class TestRevertibleRegistration(unittest.TestCase):
+    """Three modules mutate the shared tool registry and none of them could be
+    reversed. mcp_bridge.shutdown() closed its subprocesses and left their
+    tools in the registry forever; neither restrict_ function had an undo at
+    all. A registration that cannot be undone is not a registration, it is a
+    leak."""
+
+    def setUp(self):
+        self.saved = dict(TOOLS)
+
+    def tearDown(self):
+        TOOLS.clear(); TOOLS.update(self.saved)
+
+    def test_register_returns_a_disposer_that_removes_exactly_what_it_added(self):
+        undo = tools.register("temp_tool", {"effect": "read", "desc": "", "params": {},
+                                            "example": {}, "run": None})
+        self.assertIn("temp_tool", TOOLS)
+        undo()
+        self.assertNotIn("temp_tool", TOOLS)
+
+    def test_the_disposer_is_idempotent(self):
+        undo = tools.register("temp_tool", {"effect": "read", "desc": "", "params": {},
+                                            "example": {}, "run": None})
+        undo(); undo()
+        self.assertNotIn("temp_tool", TOOLS)
+
+    def test_it_restores_what_was_shadowed_not_merely_what_was_added(self):
+        """The difference that makes it an inverse rather than a delete."""
+        original = TOOLS["think"]
+        undo = tools.register("think", {"effect": "read", "desc": "impostor",
+                                        "params": {}, "example": {}, "run": None})
+        self.assertEqual(TOOLS["think"]["desc"], "impostor")
+        undo()
+        self.assertIs(TOOLS["think"], original)
+
+    def test_suppress_hides_tools_and_puts_them_back(self):
+        undo = tools.suppress(["think", "done"])
+        self.assertNotIn("think", TOOLS)
+        self.assertNotIn("done", TOOLS)
+        undo()
+        self.assertIn("think", TOOLS)
+        self.assertIn("done", TOOLS)
+
+    def test_suppressing_something_absent_is_not_an_error_and_stays_absent(self):
+        undo = tools.suppress(["never_existed"])
+        undo()
+        self.assertNotIn("never_existed", TOOLS)
+
+    def test_restrict_to_mcp_can_be_undone(self):
+        from harness import mcp_bridge
+        before = set(TOOLS)
+        undo = mcp_bridge.restrict_to_mcp()
+        self.assertNotIn("list_emails", TOOLS)
+        undo()
+        self.assertEqual(set(TOOLS), before)
+
+    def test_restrict_to_files_can_be_undone(self):
+        before = set(TOOLS)
+        undo = fs_tools.restrict_to_files()
+        self.assertNotIn("list_emails", TOOLS)
+        undo()
+        self.assertEqual(set(TOOLS), before)
+
+    def test_fs_enable_then_disable_leaves_the_registry_as_it_was(self):
+        before = set(TOOLS)
+        fs_tools.enable(self.tmpdir(), allow_shell=True)
+        self.assertIn("write_file", TOOLS)
+        fs_tools.disable()
+        self.assertEqual(set(TOOLS), before)
+
+    def tmpdir(self):
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        return d.name
+
+
 # ------------------------------------------------------------------- memory ---
 
 class TestMemory(unittest.TestCase):

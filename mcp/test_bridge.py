@@ -27,11 +27,13 @@ def check(label, condition):
 
 
 def reset():
-    """Tear the bridge down between modes — it mutates a process-global registry."""
+    """Tear the bridge down between modes.
+
+    This used to pop every injected tool by hand, because shutdown() closed the
+    subprocesses and left their tools in the registry. That workaround existing
+    here at all was the evidence the teardown was incomplete: shutdown() now
+    runs the disposer for every registry change it made, so this is one call."""
     mcp_bridge.shutdown()
-    for name in list(mcp_bridge._INJECTED):
-        TOOLS.pop(name, None)
-    mcp_bridge._INJECTED.clear()
     mcp_bridge.WRITE_TOOLS.clear()
 
 
@@ -93,6 +95,17 @@ def main():
     check("list_mail survives", "mail_list_mail" in TOOLS)
 
     reset()
+    print("\nteardown")
+    _before = set(TOOLS)
+    start("draft")
+    _added = set(TOOLS) - _before
+    mcp_bridge.restrict_to_mcp()
+    reset()
+    check("enable adds real-account tools", bool(_added))
+    check("shutdown leaves no injected tool behind", not (set(TOOLS) - _before))
+    check("shutdown restores what restrict_to_mcp suppressed",
+          not (_before - set(TOOLS)))
+
     print("\nconfig")
     check("an unknown server name fails loudly", _raises_config_error())
     check("the tool-count guard fires over budget",

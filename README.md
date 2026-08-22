@@ -159,7 +159,8 @@ call counter as ordinary tool calls. The scaffolding does not get free turns.
 
 Detail: [notes/Agent Loop.md](notes/Agent%20Loop.md) ·
 [notes/Harness Repair.md](notes/Harness%20Repair.md) ·
-[notes/Raw vs Harness.md](notes/Raw%20vs%20Harness.md)
+[notes/Raw vs Harness.md](notes/Raw%20vs%20Harness.md) ·
+[notes/Defensive Patterns.md](notes/Defensive%20Patterns.md)
 
 ---
 
