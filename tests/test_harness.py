@@ -1480,6 +1480,51 @@ class TestConfluence(unittest.TestCase):
         self.assertEqual(reg['x']['desc'], 'original')
 
 
+class TestTeardownOrder(unittest.TestCase):
+    """Cordis 4.3.1, Definition 50: a provision may only be withdrawn once
+    nothing resolves to it.
+
+    shutdown() closed the client subprocesses first and undid the registry
+    second, leaving a window between the two statements in which TOOLS still
+    advertised MCP tools whose backing process was already dead. A call landing
+    in that window reached a closed client instead of finding no such tool."""
+
+    def test_tools_are_gone_from_the_registry_before_their_client_closes(self):
+        from harness import mcp_bridge as mb
+
+        seen = {}
+
+        class DeadCanary:
+            """Reports what the registry looked like at the moment it died."""
+            def close(self):
+                seen['still_registered'] = 'canary_tool' in tools.TOOLS
+                seen['still_injected'] = 'canary_tool' in mb._INJECTED
+
+        saved_clients, saved_undo = list(mb._CLIENTS), list(mb._UNDO)
+        saved_injected = set(mb._INJECTED)
+        mb._CLIENTS.clear()
+        mb._UNDO.clear()
+        mb._INJECTED.clear()
+        try:
+            mb._UNDO.append(tools.register('canary_tool',
+                                           {'effect': 'read', 'desc': 'canary'}))
+            mb._INJECTED.add('canary_tool')
+            mb._CLIENTS.append(DeadCanary())
+            self.assertIn('canary_tool', tools.TOOLS)   # the window exists to close
+
+            mb.shutdown()
+
+            self.assertEqual(seen, {'still_registered': False, 'still_injected': False},
+                             'the client was closed while its tool was still offered')
+            self.assertNotIn('canary_tool', tools.TOOLS)
+        finally:
+            tools.TOOLS.pop('canary_tool', None)
+            mb._CLIENTS[:] = saved_clients
+            mb._UNDO[:] = saved_undo
+            mb._INJECTED.clear()
+            mb._INJECTED.update(saved_injected)
+
+
 class TestDocumentLinks(unittest.TestCase):
     """Nothing checked that a document link resolved, so a rename could break
     every reference to what it renamed and nothing would say so.

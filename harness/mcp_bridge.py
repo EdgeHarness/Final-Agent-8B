@@ -512,13 +512,22 @@ def shutdown():
     This used to close the subprocesses and leave their tools in the shared
     registry, so a process that enabled MCP kept offering real-account tools
     with nothing behind them for the rest of its life. A registration that
-    cannot be undone is not a registration, it is a leak."""
-    for c in _CLIENTS:
-        c.close()
-    _CLIENTS.clear()
+    cannot be undone is not a registration, it is a leak.
+
+    ORDER MATTERS, and it used to be the wrong way round. The registry is
+    undone FIRST and the clients are closed after. Closing first left a window,
+    between the two statements, in which TOOLS still advertised tools whose
+    backing process was already dead, so a call landing in it reached a closed
+    client instead of finding no such tool. Cordis 4.3.1 states the general
+    form: a provision may only be withdrawn once nothing resolves to it. The
+    disposers touch the registry alone and never the clients, so undoing first
+    is safe in the other direction too."""
     while _UNDO:
         _UNDO.pop()()
     _INJECTED.clear()
+    for c in _CLIENTS:
+        c.close()
+    _CLIENTS.clear()
 
 
 atexit.register(shutdown)
