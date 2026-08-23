@@ -11,6 +11,10 @@ implementation it can't keep patched.
 Everything here is **off by default**. Without `--mcp`, nothing in this folder
 runs and the agent keeps talking to the simulated office as before.
 
+> Adding a new provider? See [ADDING-A-CONNECTOR.md](ADDING-A-CONNECTOR.md). It
+> is a JSON entry in `servers.json`, not harness code, and the UI picks it up
+> automatically.
+
 ## What it costs you
 
 Model inference is still fully local — the loopback assertion in every runner
