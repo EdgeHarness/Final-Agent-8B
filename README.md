@@ -1,5 +1,10 @@
 # Agent 8B
 
+> **Shipping instance.** Engine development moved to
+> [Brick-Agent-Harness](https://github.com/EdgeHarness/Brick-Agent-Harness)
+> on 2026-08-23; this repository is its Snapdragon deployment. See
+> [UPSTREAM.md](UPSTREAM.md) for what moved where and what stays here.
+
 A local agent harness. An 8B model runs on this machine, drives a set of tools,
 and is checked by a loop that plans before it acts and verifies before it stops.
 Inference, files, memory and state stay on the device; the runner asserts its
